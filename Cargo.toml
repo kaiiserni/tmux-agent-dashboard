@@ -16,6 +16,7 @@ unicode-width = "=0.2.2"
 unicode-truncate = "=2.0.1"
 libc = "=0.2.186"
 indexmap = "=2.14.0"
+serde_json = "=1.0.149"
 
 [profile.release]
 strip = true

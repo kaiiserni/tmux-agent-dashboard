@@ -16,6 +16,11 @@ pub const PANE_ATTENTION: &str = "@pane_attention";
 /// The dashboard compares this against the activity log mtime to derive
 /// the Responded set.
 pub const PANE_LAST_SEEN_AT: &str = "@pane_last_seen_at";
+/// Epoch seconds when the user explicitly marked the pane as unread
+/// (via `prefix + N` or the dashboard's `m` toggle). Lives in the
+/// `@dashboard_*` namespace so it survives the sidebar's
+/// `clear_agent_pane_state` sweep.
+pub const PANE_MARKED_UNREAD_AT: &str = "@dashboard_marked_unread_at";
 pub const PANE_CWD: &str = "@pane_cwd";
 pub const PANE_BG_CMD: &str = "@pane_bg_cmd";
 pub const PANE_PERMISSION_MODE: &str = "@pane_permission_mode";
@@ -29,6 +34,10 @@ pub const PANE_SUBAGENTS: &str = "@pane_subagents";
 pub const PANE_WAIT_REASON: &str = "@pane_wait_reason";
 pub const PANE_WORKTREE_BRANCH: &str = "@pane_worktree_branch";
 pub const PANE_WORKTREE_NAME: &str = "@pane_worktree_name";
+
+/// Stored in `@pane_bg_cmd` when the background Bash invocation arrives
+/// without a command string we can echo back to the user.
+pub const BG_CMD_PLACEHOLDER: &str = "(background shell)";
 
 // ─── Sidebar-compatible color / icon overrides ──────────────────────
 //

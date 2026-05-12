@@ -1,6 +1,12 @@
 pub mod activity;
+pub mod adapter;
 pub mod app;
+pub mod cli;
+pub mod event;
 pub mod group;
+pub mod pending;
 pub mod state;
+pub mod time;
 pub mod tmux;
+pub mod tool_name;
 pub mod ui;

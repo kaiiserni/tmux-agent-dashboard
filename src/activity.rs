@@ -34,6 +34,10 @@ impl ActivityEntry {
     }
 }
 
+/// Sentinel tool name written at assistant-turn boundaries.
+/// Acts as a hard reset for any future task-progress parsing.
+pub const TASK_RESET_MARKER: &str = "__task_reset__";
+
 pub fn log_file_path(pane_id: &str) -> PathBuf {
     let encoded = pane_id.replace('%', "_");
     PathBuf::from(format!("/tmp/tmux-agent-activity{encoded}.log"))
