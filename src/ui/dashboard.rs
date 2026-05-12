@@ -908,26 +908,14 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
         .map(|_| Constraint::Ratio(1, cols as u32))
         .collect();
 
-    // One-group-expanded model: selection must always point into the
-    // expanded group's absolute pane range. If it isn't (e.g. just
-    // switched groups, or the expanded group's pane list shrank),
-    // snap to that group's first pane.
-    if let Some(expanded_name) = state.expanded_group.clone() {
-        let mut start = 0usize;
-        let mut hit: Option<(usize, usize)> = None;
-        for group in &state.repo_groups {
-            if group.name == expanded_name {
-                hit = Some((start, group.panes.len()));
-                break;
-            }
-            start += group.panes.len();
-        }
-        if let Some((base, len)) = hit
-            && len > 0
-            && (state.tile_selected < base || state.tile_selected >= base + len)
-        {
-            state.tile_selected = base;
-        }
+    // One-group-expanded model: `tile_selected` is a local index into the
+    // expanded group's panes (0..len). Clamp if the expanded group shrank.
+    if let Some(expanded_name) = state.expanded_group.clone()
+        && let Some(group) = state.repo_groups.iter().find(|g| g.name == expanded_name)
+        && !group.panes.is_empty()
+        && state.tile_selected >= group.panes.len()
+    {
+        state.tile_selected = group.panes.len() - 1;
     }
 
     let mut global_row: usize = 0;

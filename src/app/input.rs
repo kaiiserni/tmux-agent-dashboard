@@ -70,8 +70,7 @@ pub(super) fn handle_event(
             },
             MouseEventKind::ScrollDown if state.dashboard_tab == DashboardTab::Tiles => {
                 // One-group-expanded model: scroll = open next group.
-                let cur = state.tile_selected;
-                if let Some((g_idx, _)) = group_of_pane(state, cur)
+                if let Some(g_idx) = expanded_group_idx(state)
                     && let Some(next) = next_nonempty_group(state, g_idx, true)
                 {
                     switch_to_group(state, next, false);
@@ -79,8 +78,7 @@ pub(super) fn handle_event(
                 return true;
             }
             MouseEventKind::ScrollUp if state.dashboard_tab == DashboardTab::Tiles => {
-                let cur = state.tile_selected;
-                if let Some((g_idx, _)) = group_of_pane(state, cur)
+                if let Some(g_idx) = expanded_group_idx(state)
                     && let Some(prev) = next_nonempty_group(state, g_idx, false)
                 {
                     switch_to_group(state, prev, false);
@@ -139,7 +137,7 @@ fn handle_dashboard_tiles_key(state: &mut AppState, code: KeyCode) -> bool {
                 .map(|(i, _)| i)
             {
                 state.tile_selected = idx;
-            } else if let Some((g_idx, _)) = group_of_pane(state, cur)
+            } else if let Some(g_idx) = expanded_group_idx(state)
                 && let Some(prev) = next_nonempty_group(state, g_idx, false)
             {
                 switch_to_group(state, prev, false);
@@ -157,7 +155,7 @@ fn handle_dashboard_tiles_key(state: &mut AppState, code: KeyCode) -> bool {
                 .map(|(i, _)| i)
             {
                 state.tile_selected = idx;
-            } else if let Some((g_idx, _)) = group_of_pane(state, cur)
+            } else if let Some(g_idx) = expanded_group_idx(state)
                 && let Some(next) = next_nonempty_group(state, g_idx, true)
             {
                 switch_to_group(state, next, false);
@@ -167,7 +165,7 @@ fn handle_dashboard_tiles_key(state: &mut AppState, code: KeyCode) -> bool {
         KeyCode::Char('j') | KeyCode::Down => {
             if let Some(idx) = nearest_in_direction(state, cur_row, cur_col, true) {
                 state.tile_selected = idx;
-            } else if let Some((g_idx, _)) = group_of_pane(state, cur)
+            } else if let Some(g_idx) = expanded_group_idx(state)
                 && let Some(next) = next_nonempty_group(state, g_idx, true)
             {
                 // At bottom of current group → fold it, expand next group.
@@ -178,7 +176,7 @@ fn handle_dashboard_tiles_key(state: &mut AppState, code: KeyCode) -> bool {
         KeyCode::Char('k') | KeyCode::Up => {
             if let Some(idx) = nearest_in_direction(state, cur_row, cur_col, false) {
                 state.tile_selected = idx;
-            } else if let Some((g_idx, _)) = group_of_pane(state, cur)
+            } else if let Some(g_idx) = expanded_group_idx(state)
                 && let Some(prev) = next_nonempty_group(state, g_idx, false)
             {
                 // At top of current group → fold it, expand previous group,
@@ -188,7 +186,7 @@ fn handle_dashboard_tiles_key(state: &mut AppState, code: KeyCode) -> bool {
             true
         }
         KeyCode::Char('d') | KeyCode::PageDown => {
-            if let Some((g_idx, _)) = group_of_pane(state, cur)
+            if let Some(g_idx) = expanded_group_idx(state)
                 && let Some(next) = next_nonempty_group(state, g_idx, true)
             {
                 switch_to_group(state, next, false);
@@ -196,7 +194,7 @@ fn handle_dashboard_tiles_key(state: &mut AppState, code: KeyCode) -> bool {
             true
         }
         KeyCode::Char('u') | KeyCode::PageUp => {
-            if let Some((g_idx, _)) = group_of_pane(state, cur)
+            if let Some(g_idx) = expanded_group_idx(state)
                 && let Some(prev) = next_nonempty_group(state, g_idx, false)
             {
                 switch_to_group(state, prev, false);
@@ -316,32 +314,22 @@ pub fn init_expanded_group(state: &mut AppState) {
     }
 }
 
-/// Returns `(group_idx, in_group_offset)` for the absolute pane index
-/// `pane_abs`, where `pane_abs` is the flat index across every pane in
-/// every group (in repo_groups order). Returns None if out of range.
-fn group_of_pane(state: &AppState, pane_abs: usize) -> Option<(usize, usize)> {
-    let mut acc = 0usize;
-    for (g_idx, group) in state.repo_groups.iter().enumerate() {
-        let n = group.panes.len();
-        if pane_abs < acc + n {
-            return Some((g_idx, pane_abs - acc));
-        }
-        acc += n;
-    }
-    None
-}
-
-fn first_pane_abs_in_group(state: &AppState, g_idx: usize) -> usize {
+/// Returns the index in `state.repo_groups` of the currently expanded
+/// group, if any. `state.tile_selected` is a *local* index into that
+/// group's panes (0..panes.len()), since with the one-group-expanded
+/// model `tile_targets` only ever contains tiles from the expanded
+/// group.
+fn expanded_group_idx(state: &AppState) -> Option<usize> {
     state
-        .repo_groups
-        .iter()
-        .take(g_idx)
-        .map(|g| g.panes.len())
-        .sum()
+        .expanded_group
+        .as_ref()
+        .and_then(|name| state.repo_groups.iter().position(|g| &g.name == name))
 }
 
 /// Flip the expanded group to `g_idx` and place the selection on its
-/// first (or last) pane.
+/// first (or last) pane. `tile_selected` is a local index into the new
+/// group's panes (0..len), matching the `tile_targets` ordering that
+/// the next render will produce.
 fn switch_to_group(state: &mut AppState, g_idx: usize, to_last: bool) {
     if g_idx >= state.repo_groups.len() {
         return;
@@ -351,12 +339,7 @@ fn switch_to_group(state: &mut AppState, g_idx: usize, to_last: bool) {
         return;
     }
     state.expanded_group = Some(group.name.clone());
-    let base = first_pane_abs_in_group(state, g_idx);
-    state.tile_selected = if to_last {
-        base + group.panes.len() - 1
-    } else {
-        base
-    };
+    state.tile_selected = if to_last { group.panes.len() - 1 } else { 0 };
     // Reset scroll so the new group is visible at the top.
     state.tile_scroll_group = g_idx;
 }
