@@ -187,7 +187,7 @@ fn handle_dashboard_tiles_key(state: &mut AppState, code: KeyCode) -> bool {
             }
             true
         }
-        KeyCode::PageDown => {
+        KeyCode::Char('d') | KeyCode::PageDown => {
             if let Some((g_idx, _)) = group_of_pane(state, cur)
                 && let Some(next) = next_nonempty_group(state, g_idx, true)
             {
@@ -195,7 +195,7 @@ fn handle_dashboard_tiles_key(state: &mut AppState, code: KeyCode) -> bool {
             }
             true
         }
-        KeyCode::PageUp => {
+        KeyCode::Char('u') | KeyCode::PageUp => {
             if let Some((g_idx, _)) = group_of_pane(state, cur)
                 && let Some(prev) = next_nonempty_group(state, g_idx, false)
             {
@@ -284,16 +284,30 @@ fn toggle_fold_current(state: &mut AppState, _cur: usize) {
     toggle_fold_all(state);
 }
 
-/// Auto-pick the first non-empty group when no group is expanded or the
-/// previously-expanded group no longer exists.
+/// Only fixes a stale `expanded_group` that points at a now-missing or
+/// emptied group. A deliberate `None` (user pressed `f`/`z` to collapse
+/// every group) is preserved. Initialization to the first group is
+/// done once in `setup::init_state`, not on every refresh.
 pub fn ensure_expanded_group(state: &mut AppState) {
-    let valid = state.expanded_group.as_ref().is_some_and(|name| {
-        state
+    if let Some(name) = state.expanded_group.clone() {
+        let valid = state
             .repo_groups
             .iter()
-            .any(|g| &g.name == name && !g.panes.is_empty())
-    });
-    if !valid {
+            .any(|g| g.name == name && !g.panes.is_empty());
+        if !valid {
+            state.expanded_group = state
+                .repo_groups
+                .iter()
+                .find(|g| !g.panes.is_empty())
+                .map(|g| g.name.clone());
+        }
+    }
+}
+
+/// Initialize `expanded_group` on first start so the user sees the
+/// first non-empty group open by default.
+pub fn init_expanded_group(state: &mut AppState) {
+    if state.expanded_group.is_none() {
         state.expanded_group = state
             .repo_groups
             .iter()

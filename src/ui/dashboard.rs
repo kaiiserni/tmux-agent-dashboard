@@ -64,7 +64,7 @@ fn draw_summary(frame: &mut Frame, state: &mut AppState, area: Rect) {
     // right column is per-repo spanning the full middle height.
     let middle = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(chunks[1]);
 
     let left = Layout::default()

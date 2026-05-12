@@ -7,5 +7,6 @@ pub(super) fn init_state(tmux_pane: String) -> AppState {
     state.theme = ui::colors::ColorTheme::from_tmux();
     state.icons = ui::icons::StatusIcons::from_tmux();
     state.refresh();
+    super::input::init_expanded_group(&mut state);
     state
 }
