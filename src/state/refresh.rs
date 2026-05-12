@@ -59,11 +59,11 @@ impl AppState {
         }
     }
 
-    /// Attention-first sort: panes the user might want to look at bubble
-    /// up. Within each repo: attention-flagged first, then by status
-    /// (Waiting > Error > Idle > Running > Background > Unknown), then by
-    /// most-recent start time. Across groups: the group with the
-    /// most-urgent pane sits at the top.
+    /// Attention-first sort applied to panes WITHIN each group only.
+    /// Group order stays alphabetical (set by `group_panes_with_cache`)
+    /// so `d`/`u` navigation cycles predictably — otherwise the group's
+    /// position shifts every time a pane's status flips, and the next
+    /// keypress lands somewhere the user doesn't expect.
     pub fn sort_groups_if_needed(&mut self) {
         if !self.sort_by_activity {
             return;
@@ -89,19 +89,6 @@ impl AppState {
                 .panes
                 .sort_by(|(a, _), (b, _)| pane_sort_key(a).cmp(&pane_sort_key(b)));
         }
-        self.repo_groups.sort_by(|a, b| {
-            let ka = a.panes.first().map(|(p, _)| pane_sort_key(p)).unwrap_or((
-                1,
-                4,
-                std::cmp::Reverse(0),
-            ));
-            let kb = b.panes.first().map(|(p, _)| pane_sort_key(p)).unwrap_or((
-                1,
-                4,
-                std::cmp::Reverse(0),
-            ));
-            ka.cmp(&kb)
-        });
     }
 
     /// `(total, running, background, waiting, idle, error)` counts across
