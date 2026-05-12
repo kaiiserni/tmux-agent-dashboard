@@ -27,6 +27,10 @@ pub struct PaneGitInfo {
 /// A group of panes working in the same repository (or directory).
 #[derive(Debug, Clone)]
 pub struct RepoGroup {
+    /// Unique identifier (repo_root path or fallback pane path). Two
+    /// groups can share `name` (e.g. multiple bare-repo worktrees all
+    /// resolve to `…/main`), so `key` is what we use for identity.
+    pub key: String,
     pub name: String,
     pub has_focus: bool,
     pub panes: Vec<(PaneInfo, PaneGitInfo)>,
@@ -162,11 +166,14 @@ pub fn group_panes_with_cache(
 
                 let has_focus = window.window_active && pane.pane_active;
 
-                let group = groups.entry(group_key).or_insert_with(|| RepoGroup {
-                    name: display_name,
-                    has_focus: false,
-                    panes: Vec::new(),
-                });
+                let group = groups
+                    .entry(group_key.clone())
+                    .or_insert_with(|| RepoGroup {
+                        key: group_key.clone(),
+                        name: display_name,
+                        has_focus: false,
+                        panes: Vec::new(),
+                    });
 
                 if has_focus {
                     group.has_focus = true;

@@ -272,7 +272,7 @@ fn toggle_fold_all(state: &mut AppState) {
             .repo_groups
             .iter()
             .find(|g| !g.panes.is_empty())
-            .map(|g| g.name.clone());
+            .map(|g| g.key.clone());
     }
 }
 
@@ -287,17 +287,17 @@ fn toggle_fold_current(state: &mut AppState, _cur: usize) {
 /// every group) is preserved. Initialization to the first group is
 /// done once in `setup::init_state`, not on every refresh.
 pub fn ensure_expanded_group(state: &mut AppState) {
-    if let Some(name) = state.expanded_group.clone() {
+    if let Some(key) = state.expanded_group.clone() {
         let valid = state
             .repo_groups
             .iter()
-            .any(|g| g.name == name && !g.panes.is_empty());
+            .any(|g| g.key == key && !g.panes.is_empty());
         if !valid {
             state.expanded_group = state
                 .repo_groups
                 .iter()
                 .find(|g| !g.panes.is_empty())
-                .map(|g| g.name.clone());
+                .map(|g| g.key.clone());
         }
     }
 }
@@ -310,20 +310,18 @@ pub fn init_expanded_group(state: &mut AppState) {
             .repo_groups
             .iter()
             .find(|g| !g.panes.is_empty())
-            .map(|g| g.name.clone());
+            .map(|g| g.key.clone());
     }
 }
 
 /// Returns the index in `state.repo_groups` of the currently expanded
-/// group, if any. `state.tile_selected` is a *local* index into that
-/// group's panes (0..panes.len()), since with the one-group-expanded
-/// model `tile_targets` only ever contains tiles from the expanded
-/// group.
+/// group, if any. Match is by `key` (not display name), since two
+/// groups can share a name (e.g. multiple bare-repo worktrees).
 fn expanded_group_idx(state: &AppState) -> Option<usize> {
     state
         .expanded_group
         .as_ref()
-        .and_then(|name| state.repo_groups.iter().position(|g| &g.name == name))
+        .and_then(|key| state.repo_groups.iter().position(|g| &g.key == key))
 }
 
 /// Flip the expanded group to `g_idx` and place the selection on its
@@ -338,7 +336,7 @@ fn switch_to_group(state: &mut AppState, g_idx: usize, to_last: bool) {
     if group.panes.is_empty() {
         return;
     }
-    state.expanded_group = Some(group.name.clone());
+    state.expanded_group = Some(group.key.clone());
     state.tile_selected = if to_last { group.panes.len() - 1 } else { 0 };
     // Reset scroll so the new group is visible at the top.
     state.tile_scroll_group = g_idx;
