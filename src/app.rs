@@ -9,7 +9,7 @@ use std::time::Duration;
 use crossterm::event::{self};
 use ratatui::{Terminal, backend::CrosstermBackend};
 
-mod input;
+pub mod input;
 mod render;
 mod setup;
 

@@ -40,10 +40,11 @@ pub struct AppState {
     /// view. Bumped when navigation moves selection past the visible
     /// range.
     pub tile_scroll_group: usize,
-    /// Names of groups currently folded (collapsed) in the Tiles view.
-    /// Folded groups render only the header line; their tiles are
-    /// skipped during render and navigation.
-    pub folded_groups: std::collections::HashSet<String>,
+    /// Name of the single group currently rendered expanded in the
+    /// Tiles view. All other groups show only their header line.
+    /// `None` = every group is folded (manual collapse-all). On first
+    /// render with `None`, the first non-empty group is auto-expanded.
+    pub expanded_group: Option<String>,
     /// Currently-selected row in the Summary view (index into `summary_targets`).
     pub summary_selected: usize,
     pub summary_scroll_attention: usize,
@@ -78,7 +79,7 @@ impl AppState {
             dashboard_tab: DashboardTab::Summary,
             tile_selected: 0,
             tile_scroll_group: 0,
-            folded_groups: std::collections::HashSet::new(),
+            expanded_group: None,
             summary_selected: 0,
             summary_scroll_attention: 0,
             summary_scroll_waiting: 0,

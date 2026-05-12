@@ -840,6 +840,11 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
     state.layout.tile_visible_first = 0;
     state.layout.tile_visible_last = 0;
 
+    // Keep the "one group open" invariant. If `expanded_group` is None
+    // or points at a group that no longer exists / is empty, fall back
+    // to the first non-empty group.
+    crate::app::input::ensure_expanded_group(state);
+
     if state.repo_groups.is_empty() || state.repo_groups.iter().all(|g| g.panes.is_empty()) {
         let para = Paragraph::new(Line::from(Span::styled(
             "  no agents to show",
@@ -870,7 +875,7 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
         if group.panes.is_empty() {
             continue;
         }
-        let folded = state.folded_groups.contains(&group.name);
+        let folded = state.expanded_group.as_deref() != Some(group.name.as_str());
         let group_h = if folded {
             GROUP_HEADER_H + GROUP_SPACER_H
         } else {
@@ -903,14 +908,26 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
         .map(|_| Constraint::Ratio(1, cols as u32))
         .collect();
 
-    // Clamp selection to the upcoming target count so highlight survives shrinks.
-    let total_tiles: usize = group_indices
-        .iter()
-        .filter(|i| !state.folded_groups.contains(&state.repo_groups[**i].name))
-        .map(|i| state.repo_groups[*i].panes.len())
-        .sum();
-    if state.tile_selected >= total_tiles && total_tiles > 0 {
-        state.tile_selected = total_tiles - 1;
+    // One-group-expanded model: selection must always point into the
+    // expanded group's absolute pane range. If it isn't (e.g. just
+    // switched groups, or the expanded group's pane list shrank),
+    // snap to that group's first pane.
+    if let Some(expanded_name) = state.expanded_group.clone() {
+        let mut start = 0usize;
+        let mut hit: Option<(usize, usize)> = None;
+        for group in &state.repo_groups {
+            if group.name == expanded_name {
+                hit = Some((start, group.panes.len()));
+                break;
+            }
+            start += group.panes.len();
+        }
+        if let Some((base, len)) = hit
+            && len > 0
+            && (state.tile_selected < base || state.tile_selected >= base + len)
+        {
+            state.tile_selected = base;
+        }
     }
 
     let mut global_row: usize = 0;
@@ -918,7 +935,7 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
         let group_idx = *group_idx;
         let section = sections[slot_idx];
         let group_name = state.repo_groups[group_idx].name.clone();
-        let folded = state.folded_groups.contains(&group_name);
+        let folded = state.expanded_group.as_deref() != Some(group_name.as_str());
 
         if folded {
             // Header only — skip the grid body.
