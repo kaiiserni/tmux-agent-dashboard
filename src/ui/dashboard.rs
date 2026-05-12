@@ -81,10 +81,15 @@ fn draw_summary(frame: &mut Frame, state: &mut AppState, area: Rect) {
 
     let right = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
+        .constraints([
+            Constraint::Ratio(1, 3),
+            Constraint::Ratio(1, 3),
+            Constraint::Ratio(1, 3),
+        ])
         .split(middle[1]);
     draw_running(frame, state, right[0]);
-    draw_idle(frame, state, right[1]);
+    draw_marked_unread(frame, state, right[1]);
+    draw_idle(frame, state, right[2]);
 
     // Clamp selection across the combined summary_targets after both lists rendered.
     let total = state.layout.summary_targets.len();
@@ -477,6 +482,7 @@ fn section_scroll(state: &AppState, section: SummarySection) -> usize {
         SummarySection::Waiting => state.summary_scroll_waiting,
         SummarySection::Responded => state.summary_scroll_responded,
         SummarySection::Running => state.summary_scroll_running,
+        SummarySection::MarkedUnread => state.summary_scroll_marked_unread,
         SummarySection::Idle => state.summary_scroll_idle,
     }
 }
@@ -487,6 +493,7 @@ fn set_section_scroll(state: &mut AppState, section: SummarySection, value: usiz
         SummarySection::Waiting => state.summary_scroll_waiting = value,
         SummarySection::Responded => state.summary_scroll_responded = value,
         SummarySection::Running => state.summary_scroll_running = value,
+        SummarySection::MarkedUnread => state.summary_scroll_marked_unread = value,
         SummarySection::Idle => state.summary_scroll_idle = value,
     }
 }
@@ -497,6 +504,7 @@ fn update_section_rect(state: &mut AppState, section: SummarySection, rect: Rect
         SummarySection::Waiting => &mut state.layout.summary_section_waiting,
         SummarySection::Responded => &mut state.layout.summary_section_responded,
         SummarySection::Running => &mut state.layout.summary_section_running,
+        SummarySection::MarkedUnread => &mut state.layout.summary_section_marked_unread,
         SummarySection::Idle => &mut state.layout.summary_section_idle,
     };
     entry.rect = rect;
@@ -600,6 +608,65 @@ fn draw_responded(frame: &mut Frame, state: &mut AppState, area: Rect) {
     render_list_with_targets(frame, state, inner, &rows, SummarySection::Responded);
 }
 
+fn draw_marked_unread(frame: &mut Frame, state: &mut AppState, area: Rect) {
+    let block = block_with_title(state, "marked unread");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Pinned-by-user panes that are still purely Idle (the cleanup sweep
+    // in state.refresh() drops marks the moment a pane gets busy again).
+    // Sorted newest-marked first.
+    let mut rows: Vec<(SummaryRow, u64)> = state
+        .repo_groups
+        .iter()
+        .flat_map(|g| {
+            g.panes
+                .iter()
+                .map(move |(p, info)| (g.name.clone(), p, info))
+        })
+        .filter(|(_, p, _)| {
+            matches!(p.status, PaneStatus::Idle)
+                && !p.attention
+                && p.marked_unread_at.is_some()
+                && !crate::pending::pane_is_unseen(p)
+        })
+        .map(|(group_name, p, info)| {
+            let branch = resolve_branch(p, info);
+            let marked_at = p.marked_unread_at.unwrap_or(0);
+            let reason = if !p.prompt.is_empty() {
+                p.prompt.clone()
+            } else {
+                "pinned".into()
+            };
+            let row = SummaryRow {
+                status_icon: "📌".to_string(),
+                status_color: state.theme.badge_plan,
+                agent_glyph: p.agent.glyph(),
+                agent_color: agent_color(state, &p.agent),
+                title: format!("{group_name}  {branch}"),
+                reason,
+                pane_id: p.pane_id.clone(),
+            };
+            (row, marked_at)
+        })
+        .collect();
+
+    rows.sort_by(|a, b| b.1.cmp(&a.1));
+    let rows: Vec<SummaryRow> = rows.into_iter().map(|(r, _)| r).collect();
+
+    if rows.is_empty() {
+        update_section_rect(state, SummarySection::MarkedUnread, inner, 0);
+        let para = Paragraph::new(Line::from(Span::styled(
+            "  no pinned panes",
+            Style::default().fg(state.theme.text_muted),
+        )));
+        frame.render_widget(para, inner);
+        return;
+    }
+
+    render_list_with_targets(frame, state, inner, &rows, SummarySection::MarkedUnread);
+}
+
 fn draw_idle(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let block = block_with_title(state, "idle");
     let inner = block.inner(area);
@@ -615,7 +682,11 @@ fn draw_idle(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 .iter()
                 .map(move |(p, info)| (g.name.clone(), p, info))
         })
-        .filter(|(_, p, _)| matches!(p.status, PaneStatus::Idle) && !pane_is_unseen(p))
+        .filter(|(_, p, _)| {
+            matches!(p.status, PaneStatus::Idle)
+                && !pane_is_unseen(p)
+                && p.marked_unread_at.is_none()
+        })
         .map(|(group_name, p, info)| {
             let branch = resolve_branch(p, info);
             let mtime = crate::activity::log_mtime(&p.pane_id).unwrap_or(std::time::UNIX_EPOCH);

@@ -6,9 +6,7 @@ pub mod layout;
 mod refresh;
 
 pub use focus::FocusState;
-pub use layout::{
-    FrameLayout, SummarySectionRect, SummaryTarget, TileTarget,
-};
+pub use layout::{FrameLayout, SummarySectionRect, SummaryTarget, TileTarget};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DashboardTab {
@@ -23,6 +21,7 @@ pub enum SummarySection {
     Waiting,
     Responded,
     Running,
+    MarkedUnread,
     Idle,
 }
 
@@ -45,6 +44,7 @@ pub struct AppState {
     pub summary_scroll_waiting: usize,
     pub summary_scroll_responded: usize,
     pub summary_scroll_running: usize,
+    pub summary_scroll_marked_unread: usize,
     pub summary_scroll_idle: usize,
     /// Set by `q` / `Esc` handlers to break out of the event loop cleanly.
     pub should_exit: bool,
@@ -68,6 +68,7 @@ impl AppState {
             summary_scroll_waiting: 0,
             summary_scroll_responded: 0,
             summary_scroll_running: 0,
+            summary_scroll_marked_unread: 0,
             summary_scroll_idle: 0,
             should_exit: false,
         }

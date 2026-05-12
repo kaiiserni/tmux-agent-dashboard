@@ -8,6 +8,7 @@ impl AppState {
     pub fn refresh(&mut self) {
         let sessions = tmux::query_sessions();
         self.repo_groups = group_panes_by_repo(&sessions);
+        crate::pending::sweep_stale_marks(&mut self.repo_groups);
         self.sort_groups_if_needed();
     }
 

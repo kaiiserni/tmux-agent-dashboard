@@ -12,6 +12,10 @@ pub struct PaneInfo {
     /// `after-select-pane` hook → `seen` CLI subcommand). Compared against
     /// the activity log mtime to derive Responded state.
     pub last_seen_at: Option<u64>,
+    /// Epoch seconds when the user marked the pane as unread (`prefix + N`
+    /// or dashboard `m` toggle). Auto-cleared when the pane's status
+    /// leaves Idle, gains attention, or new auto-Responded activity fires.
+    pub marked_unread_at: Option<u64>,
     pub agent: AgentType,
     pub path: String,
     pub current_command: String,

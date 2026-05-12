@@ -21,6 +21,7 @@ pub struct FrameLayout {
     pub summary_section_waiting: SummarySectionRect,
     pub summary_section_responded: SummarySectionRect,
     pub summary_section_running: SummarySectionRect,
+    pub summary_section_marked_unread: SummarySectionRect,
     pub summary_section_idle: SummarySectionRect,
 }
 

@@ -7,8 +7,8 @@
 
 use super::commands::run_tmux;
 use super::options::{
-    PANE_AGENT, PANE_ATTENTION, PANE_BG_CMD, PANE_CWD, PANE_LAST_SEEN_AT, PANE_NAME,
-    PANE_PERMISSION_MODE, PANE_PROMPT, PANE_PROMPT_SOURCE, PANE_ROLE, PANE_SESSION_ID,
+    PANE_AGENT, PANE_ATTENTION, PANE_BG_CMD, PANE_CWD, PANE_LAST_SEEN_AT, PANE_MARKED_UNREAD_AT,
+    PANE_NAME, PANE_PERMISSION_MODE, PANE_PROMPT, PANE_PROMPT_SOURCE, PANE_ROLE, PANE_SESSION_ID,
     PANE_STARTED_AT, PANE_STATUS, PANE_SUBAGENTS, PANE_WAIT_REASON, PANE_WORKTREE_BRANCH,
     PANE_WORKTREE_NAME,
 };
@@ -46,7 +46,8 @@ mod pane_line_field {
     pub const SESSION_ID: usize = 19;
     pub const BG_CMD: usize = 20;
     pub const LAST_SEEN_AT: usize = 21;
-    pub const MIN_FIELDS: usize = 22;
+    pub const MARKED_UNREAD_AT: usize = 22;
+    pub const MIN_FIELDS: usize = 23;
 }
 
 fn q(field: &str) -> String {
@@ -83,6 +84,7 @@ fn pane_format() -> String {
         q(PANE_SESSION_ID),
         q(PANE_BG_CMD),
         q(PANE_LAST_SEEN_AT),
+        q(PANE_MARKED_UNREAD_AT),
     ]
     .join("|")
 }
@@ -186,6 +188,7 @@ fn parse_pane_fields(parts: &[String]) -> Option<PaneInfo> {
         status: PaneStatus::from_label(&parts[pane_line_field::PANE_STATUS]),
         attention: !parts[pane_line_field::PANE_ATTENTION].is_empty(),
         last_seen_at: parts[pane_line_field::LAST_SEEN_AT].parse().ok(),
+        marked_unread_at: parts[pane_line_field::MARKED_UNREAD_AT].parse().ok(),
         agent,
         path,
         current_command: parts[pane_line_field::PANE_CURRENT_COMMAND].to_string(),

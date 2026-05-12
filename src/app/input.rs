@@ -33,8 +33,7 @@ pub(super) fn handle_event(
             _ => {}
         }
 
-        if state.dashboard_tab == DashboardTab::Tiles
-            && handle_dashboard_tiles_key(state, key.code)
+        if state.dashboard_tab == DashboardTab::Tiles && handle_dashboard_tiles_key(state, key.code)
         {
             return true;
         }
@@ -203,7 +202,13 @@ fn nearest_in_direction(
         .tile_targets
         .iter()
         .enumerate()
-        .filter(|(_, t)| if down { t.row > cur_row } else { t.row < cur_row })
+        .filter(|(_, t)| {
+            if down {
+                t.row > cur_row
+            } else {
+                t.row < cur_row
+            }
+        })
         .collect();
     if candidates.is_empty() {
         return None;
@@ -221,11 +226,10 @@ fn nearest_in_direction(
 }
 
 fn find_tile_at(state: &AppState, row: u16, col: u16) -> Option<usize> {
-    state
-        .layout
-        .tile_targets
-        .iter()
-        .position(|t| t.rect.contains(ratatui::layout::Position { x: col, y: row }))
+    state.layout.tile_targets.iter().position(|t| {
+        t.rect
+            .contains(ratatui::layout::Position { x: col, y: row })
+    })
 }
 
 // ─── Summary tab navigation ─────────────────────────────────────────
@@ -257,9 +261,7 @@ fn handle_dashboard_summary_key(state: &mut AppState, code: KeyCode) -> bool {
             let cur_section = state.layout.summary_targets[cur].section;
             if cur + 1 < total {
                 let next_section = state.layout.summary_targets[cur + 1].section;
-                if next_section == cur_section
-                    || !section_has_hidden_below(state, cur_section)
-                {
+                if next_section == cur_section || !section_has_hidden_below(state, cur_section) {
                     state.summary_selected = cur + 1;
                 } else {
                     scroll_summary_section(state, cur_section, 1);
@@ -273,9 +275,7 @@ fn handle_dashboard_summary_key(state: &mut AppState, code: KeyCode) -> bool {
             let cur_section = state.layout.summary_targets[cur].section;
             if cur > 0 {
                 let prev_section = state.layout.summary_targets[cur - 1].section;
-                if prev_section == cur_section
-                    || !section_has_hidden_above(state, cur_section)
-                {
+                if prev_section == cur_section || !section_has_hidden_above(state, cur_section) {
                     state.summary_selected = cur - 1;
                 } else {
                     scroll_summary_section(state, cur_section, -1);
@@ -304,6 +304,7 @@ fn handle_dashboard_summary_key(state: &mut AppState, code: KeyCode) -> bool {
                 SummarySection::Waiting,
                 SummarySection::Responded,
                 SummarySection::Running,
+                SummarySection::MarkedUnread,
                 SummarySection::Idle,
             ] {
                 set_section_scroll(state, s, 0);
@@ -324,6 +325,12 @@ fn handle_dashboard_summary_key(state: &mut AppState, code: KeyCode) -> bool {
             scroll_summary_section(state, cur_section, -3);
             true
         }
+        KeyCode::Char('m') => {
+            if let Some(target) = state.layout.summary_targets.get(cur).cloned() {
+                toggle_mark(state, &target.pane_id);
+            }
+            true
+        }
         KeyCode::Enter => {
             if let Some(target) = state.layout.summary_targets.get(cur).cloned() {
                 state.activate_pane_by_id(&target.pane_id);
@@ -335,6 +342,36 @@ fn handle_dashboard_summary_key(state: &mut AppState, code: KeyCode) -> bool {
     }
 }
 
+/// Toggle the `@dashboard_marked_unread_at` flag on a pane. Sets the
+/// current epoch if absent, unsets if present. Mutates AppState's
+/// in-memory pane so the next render reflects the new state without
+/// waiting for a refresh.
+fn toggle_mark(state: &mut AppState, pane_id: &str) {
+    use crate::tmux;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut new_value: Option<u64> = None;
+    for group in state.repo_groups.iter_mut() {
+        for (pane, _) in group.panes.iter_mut() {
+            if pane.pane_id == pane_id {
+                if pane.marked_unread_at.is_some() {
+                    pane.marked_unread_at = None;
+                    tmux::unset_pane_option(pane_id, tmux::PANE_MARKED_UNREAD_AT);
+                } else {
+                    pane.marked_unread_at = Some(now);
+                    new_value = Some(now);
+                }
+                break;
+            }
+        }
+    }
+    if let Some(v) = new_value {
+        tmux::set_pane_option(pane_id, tmux::PANE_MARKED_UNREAD_AT, &v.to_string());
+    }
+}
+
 fn is_left_column(section: SummarySection) -> bool {
     matches!(
         section,
@@ -342,11 +379,7 @@ fn is_left_column(section: SummarySection) -> bool {
     )
 }
 
-fn nearest_in_other_column(
-    state: &AppState,
-    cur: usize,
-    target_right: bool,
-) -> Option<usize> {
+fn nearest_in_other_column(state: &AppState, cur: usize, target_right: bool) -> Option<usize> {
     let cur_target = state.layout.summary_targets.get(cur)?;
     let cur_y = cur_target.rect.y as i32;
     state
@@ -363,11 +396,10 @@ fn nearest_in_other_column(
 }
 
 fn find_summary_at(state: &AppState, row: u16, col: u16) -> Option<usize> {
-    state
-        .layout
-        .summary_targets
-        .iter()
-        .position(|t| t.rect.contains(ratatui::layout::Position { x: col, y: row }))
+    state.layout.summary_targets.iter().position(|t| {
+        t.rect
+            .contains(ratatui::layout::Position { x: col, y: row })
+    })
 }
 
 // ─── Summary section scroll helpers ─────────────────────────────────
@@ -381,6 +413,7 @@ pub fn section_rect_for(
         SummarySection::Waiting => &state.layout.summary_section_waiting,
         SummarySection::Responded => &state.layout.summary_section_responded,
         SummarySection::Running => &state.layout.summary_section_running,
+        SummarySection::MarkedUnread => &state.layout.summary_section_marked_unread,
         SummarySection::Idle => &state.layout.summary_section_idle,
     }
 }
@@ -391,6 +424,7 @@ pub fn section_scroll_get(state: &AppState, section: SummarySection) -> usize {
         SummarySection::Waiting => state.summary_scroll_waiting,
         SummarySection::Responded => state.summary_scroll_responded,
         SummarySection::Running => state.summary_scroll_running,
+        SummarySection::MarkedUnread => state.summary_scroll_marked_unread,
         SummarySection::Idle => state.summary_scroll_idle,
     }
 }
@@ -401,6 +435,7 @@ pub fn set_section_scroll(state: &mut AppState, section: SummarySection, value: 
         SummarySection::Waiting => state.summary_scroll_waiting = value,
         SummarySection::Responded => state.summary_scroll_responded = value,
         SummarySection::Running => state.summary_scroll_running = value,
+        SummarySection::MarkedUnread => state.summary_scroll_marked_unread = value,
         SummarySection::Idle => state.summary_scroll_idle = value,
     }
 }
@@ -436,6 +471,7 @@ fn first_nonempty_section(state: &AppState) -> Option<SummarySection> {
         SummarySection::Waiting,
         SummarySection::Responded,
         SummarySection::Running,
+        SummarySection::MarkedUnread,
         SummarySection::Idle,
     ]
     .into_iter()
@@ -448,6 +484,7 @@ fn summary_section_at(state: &AppState, row: u16, col: u16) -> Option<SummarySec
         SummarySection::Waiting,
         SummarySection::Responded,
         SummarySection::Running,
+        SummarySection::MarkedUnread,
         SummarySection::Idle,
     ]
     .into_iter()
