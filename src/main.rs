@@ -61,6 +61,9 @@ fn main() -> io::Result<()> {
         Some("back") => {
             return cmd_back();
         }
+        Some("mark") => {
+            return cmd_mark();
+        }
         Some("hook") => {
             let code = hook::cmd_hook(&args[1..]);
             std::process::exit(code);
@@ -253,7 +256,13 @@ const JUMP_FROM: &str = "@dashboard_jump_from";
 const JUMP_TO: &str = "@dashboard_jump_to";
 
 fn cmd_next() -> io::Result<()> {
-    let entries = pending::collect_pending();
+    // Marked Unread is a user-curated parking lot, not an urgency
+    // signal — don't surface it via `prefix + n`. It stays visible in
+    // the status-line.
+    let entries: Vec<_> = pending::collect_pending()
+        .into_iter()
+        .filter(|e| e.priority != Priority::MarkedUnread)
+        .collect();
     let target = match entries.first() {
         Some(t) => t,
         None => {
@@ -280,41 +289,41 @@ fn cmd_next() -> io::Result<()> {
 }
 
 /// Undo the most recent `next` jump: switch back to the pane we came
-/// from AND mark the pane we just visited with
-/// `@dashboard_marked_unread_at` so it surfaces in the Marked Unread
-/// box. Without a `next`-history, mark the current pane in place.
+/// from. Marking is no longer part of this — use `mark` for that.
 fn cmd_back() -> io::Result<()> {
     let from = tmux::run_tmux(&["show", "-gv", JUMP_FROM])
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
-    let to = tmux::run_tmux(&["show", "-gv", JUMP_TO])
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default();
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-
-    let target = if !to.is_empty() {
-        to.clone()
-    } else {
-        // No jump history → mark the current active pane in place.
-        tmux::run_tmux(&["display-message", "-p", "#{pane_id}"])
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default()
-    };
-
-    if target.is_empty() {
+    if from.is_empty() {
+        let _ = tmux::run_tmux(&["display-message", "Nothing to go back to"]);
         return Ok(());
     }
-
-    tmux::set_pane_option(&target, tmux::PANE_MARKED_UNREAD_AT, &now.to_string());
-
-    if !from.is_empty() {
-        tmux::select_pane(&from);
-    }
-
+    tmux::select_pane(&from);
     let _ = tmux::run_tmux(&["set", "-gu", JUMP_FROM]);
     let _ = tmux::run_tmux(&["set", "-gu", JUMP_TO]);
+    Ok(())
+}
+
+/// Toggle `@dashboard_marked_unread_at` on the currently active pane.
+/// Bound to `prefix + m`, mirrors the dashboard's `m` key.
+fn cmd_mark() -> io::Result<()> {
+    let pane = tmux::run_tmux(&["display-message", "-p", "#{pane_id}"])
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    if pane.is_empty() {
+        return Ok(());
+    }
+    let existing = tmux::get_pane_option_value(&pane, tmux::PANE_MARKED_UNREAD_AT);
+    if existing.is_empty() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        tmux::set_pane_option(&pane, tmux::PANE_MARKED_UNREAD_AT, &now.to_string());
+        let _ = tmux::run_tmux(&["display-message", "Marked unread"]);
+    } else {
+        tmux::unset_pane_option(&pane, tmux::PANE_MARKED_UNREAD_AT);
+        let _ = tmux::run_tmux(&["display-message", "Unmarked"]);
+    }
     Ok(())
 }

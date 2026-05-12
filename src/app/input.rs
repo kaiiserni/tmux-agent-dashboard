@@ -69,17 +69,12 @@ pub(super) fn handle_event(
                 }
             },
             MouseEventKind::ScrollDown if state.dashboard_tab == DashboardTab::Tiles => {
-                let last_group = state.repo_groups.len().saturating_sub(1);
-                if state.tile_scroll_group < last_group {
-                    state.tile_scroll_group += 1;
-                    return true;
-                }
+                state.tile_scroll_row = state.tile_scroll_row.saturating_add(2);
+                return true;
             }
             MouseEventKind::ScrollUp if state.dashboard_tab == DashboardTab::Tiles => {
-                if state.tile_scroll_group > 0 {
-                    state.tile_scroll_group -= 1;
-                    return true;
-                }
+                state.tile_scroll_row = state.tile_scroll_row.saturating_sub(2);
+                return true;
             }
             MouseEventKind::ScrollDown if state.dashboard_tab == DashboardTab::Summary => {
                 if let Some(section) = summary_section_at(state, mouse.row, mouse.column) {
@@ -100,90 +95,87 @@ pub(super) fn handle_event(
     needs_redraw
 }
 
-// ─── Tiles tab navigation ───────────────────────────────────────────
+// ─── Tiles tab navigation (accordion) ───────────────────────────────
 
 fn handle_dashboard_tiles_key(state: &mut AppState, code: KeyCode) -> bool {
-    let total = state.layout.tile_targets.len();
-    if total == 0 {
+    // tile_targets holds every pane in render order (row index == pane
+    // index across groups). Navigation is purely linear; the accordion
+    // renderer handles scroll + expansion automatically.
+    let total_targets = state.layout.tile_targets.len();
+    // Use repo_groups as the source of truth: tile_targets only
+    // contains panes that were visible this frame, but selection is a
+    // global index across all panes.
+    let total_panes: usize = state.repo_groups.iter().map(|g| g.panes.len()).sum();
+    if total_panes == 0 {
         return false;
     }
-    let cur = state.tile_selected.min(total - 1);
-    let (cur_row, cur_col) = {
-        let t = &state.layout.tile_targets[cur];
-        (t.row, t.col)
-    };
+    let cur = state.tile_selected.min(total_panes - 1);
 
     match code {
+        KeyCode::Char('j') | KeyCode::Down => {
+            if cur + 1 < total_panes {
+                state.tile_selected = cur + 1;
+            }
+            true
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            if cur > 0 {
+                state.tile_selected = cur - 1;
+            }
+            true
+        }
         KeyCode::Char('h') | KeyCode::Left => {
-            if let Some(idx) = state
-                .layout
-                .tile_targets
-                .iter()
-                .enumerate()
-                .filter(|(_, t)| t.row == cur_row && t.col < cur_col)
-                .max_by_key(|(_, t)| t.col)
-                .map(|(i, _)| i)
-                .or(if cur > 0 { Some(cur - 1) } else { None })
-            {
+            // Jump to first pane of the previous non-empty group.
+            if let Some(idx) = first_pane_of_adjacent_group(state, cur, false) {
                 state.tile_selected = idx;
             }
             true
         }
         KeyCode::Char('l') | KeyCode::Right => {
-            if let Some(idx) = state
-                .layout
-                .tile_targets
-                .iter()
-                .enumerate()
-                .filter(|(_, t)| t.row == cur_row && t.col > cur_col)
-                .min_by_key(|(_, t)| t.col)
-                .map(|(i, _)| i)
-                .or(if cur + 1 < total { Some(cur + 1) } else { None })
-            {
+            // Jump to first pane of the next non-empty group.
+            if let Some(idx) = first_pane_of_adjacent_group(state, cur, true) {
                 state.tile_selected = idx;
-            }
-            true
-        }
-        KeyCode::Char('j') | KeyCode::Down => {
-            if let Some(idx) = nearest_in_direction(state, cur_row, cur_col, true) {
-                state.tile_selected = idx;
-            } else {
-                let last_group = state.repo_groups.len().saturating_sub(1);
-                if state.layout.tile_visible_last < last_group {
-                    state.tile_scroll_group += 1;
-                    state.tile_selected = 0;
-                }
-            }
-            true
-        }
-        KeyCode::Char('k') | KeyCode::Up => {
-            if let Some(idx) = nearest_in_direction(state, cur_row, cur_col, false) {
-                state.tile_selected = idx;
-            } else if state.tile_scroll_group > 0 {
-                state.tile_scroll_group -= 1;
-                state.tile_selected = usize::MAX;
             }
             true
         }
         KeyCode::PageDown => {
-            let last_group = state.repo_groups.len().saturating_sub(1);
-            if state.tile_scroll_group < last_group {
-                state.tile_scroll_group += 1;
-                state.tile_selected = 0;
-            }
+            state.tile_selected = (cur + 5).min(total_panes - 1);
             true
         }
         KeyCode::PageUp => {
-            if state.tile_scroll_group > 0 {
-                state.tile_scroll_group -= 1;
-                state.tile_selected = 0;
+            state.tile_selected = cur.saturating_sub(5);
+            true
+        }
+        KeyCode::Char('g') => {
+            state.tile_selected = 0;
+            true
+        }
+        KeyCode::Char('G') => {
+            state.tile_selected = total_panes - 1;
+            true
+        }
+        KeyCode::Char('m') => {
+            // Toggle marked-unread on the currently selected pane.
+            if let Some(pane_id) = pane_id_for_flat_index(state, cur) {
+                toggle_tile_mark(state, &pane_id);
             }
+            true
+        }
+        KeyCode::Char('f') => {
+            // Fold / unfold every pane in the Tiles view.
+            state.tile_all_expanded = !state.tile_all_expanded;
             true
         }
         KeyCode::Enter => {
             if let Some(target) = state.layout.tile_targets.get(cur).cloned() {
                 state.activate_pane_by_id(&target.pane_id);
                 state.should_exit = true;
+            } else if total_targets > 0 {
+                // Fallback: selected pane scrolled off-screen — still activate.
+                if let Some(pane_id) = pane_id_for_flat_index(state, cur) {
+                    state.activate_pane_by_id(&pane_id);
+                    state.should_exit = true;
+                }
             }
             true
         }
@@ -191,38 +183,101 @@ fn handle_dashboard_tiles_key(state: &mut AppState, code: KeyCode) -> bool {
     }
 }
 
-fn nearest_in_direction(
-    state: &AppState,
-    cur_row: usize,
-    cur_col: usize,
-    down: bool,
-) -> Option<usize> {
-    let candidates: Vec<(usize, &crate::state::TileTarget)> = state
-        .layout
-        .tile_targets
-        .iter()
-        .enumerate()
-        .filter(|(_, t)| {
-            if down {
-                t.row > cur_row
-            } else {
-                t.row < cur_row
-            }
-        })
-        .collect();
-    if candidates.is_empty() {
-        return None;
+fn pane_id_for_flat_index(state: &AppState, idx: usize) -> Option<String> {
+    let mut acc = 0usize;
+    for group in &state.repo_groups {
+        if idx < acc + group.panes.len() {
+            let p_idx = idx - acc;
+            return Some(group.panes[p_idx].0.pane_id.clone());
+        }
+        acc += group.panes.len();
     }
-    let target_row = if down {
-        candidates.iter().map(|(_, t)| t.row).min().unwrap()
+    None
+}
+
+/// Returns the flat pane index of the first pane in the adjacent group
+/// (`forward=true` → next group, else previous).
+fn first_pane_of_adjacent_group(state: &AppState, cur: usize, forward: bool) -> Option<usize> {
+    // Find the (group_idx, group_offset) for the current selection.
+    let mut acc = 0usize;
+    let mut cur_group = 0usize;
+    for (g_idx, group) in state.repo_groups.iter().enumerate() {
+        if cur < acc + group.panes.len() {
+            cur_group = g_idx;
+            break;
+        }
+        acc += group.panes.len();
+    }
+
+    let group_range: Vec<usize> = if forward {
+        ((cur_group + 1)..state.repo_groups.len()).collect()
     } else {
-        candidates.iter().map(|(_, t)| t.row).max().unwrap()
+        (0..cur_group).rev().collect()
     };
-    candidates
-        .into_iter()
-        .filter(|(_, t)| t.row == target_row)
-        .min_by_key(|(_, t)| (t.col as isize - cur_col as isize).abs())
-        .map(|(i, _)| i)
+    let mut offset = 0usize;
+    if !forward {
+        // Compute offsets for previous groups.
+        for g in 0..cur_group {
+            offset += state.repo_groups[g].panes.len();
+        }
+    }
+    for g in group_range {
+        if !forward {
+            offset = offset.saturating_sub(state.repo_groups[g].panes.len());
+        }
+        if !state.repo_groups[g].panes.is_empty() {
+            return Some(if forward {
+                acc + state.repo_groups[cur_group].panes.len()
+                    + state
+                        .repo_groups
+                        .iter()
+                        .skip(cur_group + 1)
+                        .take(g - cur_group - 1)
+                        .map(|gp| gp.panes.len())
+                        .sum::<usize>()
+            } else {
+                offset
+            });
+        }
+        if forward {
+            // forward variant: simply find the first non-empty group after
+            // current and compute its starting flat index.
+            let start: usize = state
+                .repo_groups
+                .iter()
+                .take(g)
+                .map(|gp| gp.panes.len())
+                .sum();
+            return Some(start);
+        }
+    }
+    None
+}
+
+fn toggle_tile_mark(state: &mut AppState, pane_id: &str) {
+    use crate::tmux;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut set_value: Option<u64> = None;
+    for group in state.repo_groups.iter_mut() {
+        for (pane, _) in group.panes.iter_mut() {
+            if pane.pane_id == pane_id {
+                if pane.marked_unread_at.is_some() {
+                    pane.marked_unread_at = None;
+                    tmux::unset_pane_option(pane_id, tmux::PANE_MARKED_UNREAD_AT);
+                } else {
+                    pane.marked_unread_at = Some(now);
+                    set_value = Some(now);
+                }
+                break;
+            }
+        }
+    }
+    if let Some(v) = set_value {
+        tmux::set_pane_option(pane_id, tmux::PANE_MARKED_UNREAD_AT, &v.to_string());
+    }
 }
 
 fn find_tile_at(state: &AppState, row: u16, col: u16) -> Option<usize> {

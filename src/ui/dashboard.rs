@@ -10,7 +10,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Padding, Paragraph},
+    widgets::{Block, Borders, Paragraph},
 };
 
 use crate::activity::{GlobalActivityEntry, read_all_activity};
@@ -797,14 +797,390 @@ fn resolve_repo_label(state: &AppState, pane_id: &str) -> String {
     "—".into()
 }
 
-// ── tiles view ──────────────────────────────────────────────────────
+// ── tiles view (accordion) ──────────────────────────────────────────
+//
+// Vertical list, one line per pane (collapsed) and a few extra lines
+// for the currently-selected pane (expanded inline body with `│` bar).
+// Group headers separate panes by repo. Auto-scroll keeps the
+// selected pane in view.
 
-/// Best-effort stable label for a tile. Prefers the Claude session name
-/// (`/rename` label) since that's the user's chosen identity for the
-/// agent, then falls back through git branch, worktree, working
-/// directory basename, and pane id so the label never flickers to a
-/// placeholder while async data is in flight.
-fn tile_label(pane: &PaneInfo, info: &crate::group::PaneGitInfo) -> String {
+const GROUP_HEADER_H: u16 = 1;
+/// Total height of an expanded pane (1 summary + 2 body lines).
+const EXPANDED_H: u16 = 3;
+
+#[derive(Clone, Copy)]
+struct TileEntry {
+    group_idx: usize,
+    pane_idx: usize,
+}
+
+fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
+    state.layout.tile_targets.clear();
+    state.layout.tile_cols = 0;
+    state.layout.tile_visible_first = 0;
+    state.layout.tile_visible_last = 0;
+
+    // Flat list of pane entries across groups (excludes empty groups).
+    let mut entries: Vec<TileEntry> = Vec::new();
+    for (g_idx, group) in state.repo_groups.iter().enumerate() {
+        for p_idx in 0..group.panes.len() {
+            entries.push(TileEntry {
+                group_idx: g_idx,
+                pane_idx: p_idx,
+            });
+        }
+    }
+
+    if entries.is_empty() {
+        let para = Paragraph::new(Line::from(Span::styled(
+            "  no agents to show",
+            Style::default().fg(state.theme.text_muted),
+        )));
+        frame.render_widget(para, area);
+        return;
+    }
+
+    // Clamp selection to the visible tile range.
+    if state.tile_selected >= entries.len() {
+        state.tile_selected = entries.len() - 1;
+    }
+    let selected = state.tile_selected;
+
+    // Compute y-position + height for each entry, and y-position for
+    // each group header. Heights are in rows starting from 0 (virtual
+    // canvas — scroll offset is applied at render time).
+    let mut entry_pos: Vec<(u16, u16)> = Vec::with_capacity(entries.len());
+    let mut header_pos: Vec<(usize, u16)> = Vec::new();
+    let mut y: u16 = 0;
+    let mut last_group: Option<usize> = None;
+    for (i, e) in entries.iter().enumerate() {
+        if last_group != Some(e.group_idx) {
+            header_pos.push((e.group_idx, y));
+            y = y.saturating_add(GROUP_HEADER_H);
+            last_group = Some(e.group_idx);
+        }
+        let expanded = state.tile_all_expanded || i == selected;
+        let h = if expanded { EXPANDED_H } else { 1 };
+        entry_pos.push((y, h));
+        y = y.saturating_add(h);
+    }
+    let total_h = y;
+
+    // Auto-scroll: keep selected entry fully visible.
+    let (sel_y, sel_h) = entry_pos[selected];
+    let view_h = area.height;
+    let mut scroll = state.tile_scroll_row;
+    if sel_y < scroll {
+        scroll = sel_y;
+    }
+    if sel_y.saturating_add(sel_h) > scroll.saturating_add(view_h) {
+        scroll = sel_y.saturating_add(sel_h).saturating_sub(view_h);
+    }
+    let max_scroll = total_h.saturating_sub(view_h);
+    if scroll > max_scroll {
+        scroll = max_scroll;
+    }
+    state.tile_scroll_row = scroll;
+
+    // Render group headers within viewport.
+    for (g_idx, hy) in &header_pos {
+        let header_bottom = hy.saturating_add(GROUP_HEADER_H);
+        if header_bottom <= scroll || *hy >= scroll.saturating_add(view_h) {
+            continue;
+        }
+        let render_y = area.y.saturating_add(hy.saturating_sub(scroll));
+        let header_rect = Rect {
+            x: area.x,
+            y: render_y,
+            width: area.width,
+            height: GROUP_HEADER_H,
+        };
+        let group = &state.repo_groups[*g_idx];
+        let count = group.panes.len();
+        let attention = group
+            .panes
+            .iter()
+            .filter(|(p, _)| needs_attention(&p.status, p.attention))
+            .count();
+        draw_group_header(frame, state, header_rect, &group.name, count, attention);
+    }
+
+    // Render entries (collapsed / expanded) within viewport. Clone
+    // PaneInfo + PaneGitInfo to release the borrow on state before
+    // pushing the click target.
+    for (i, e) in entries.iter().enumerate() {
+        let (py, ph) = entry_pos[i];
+        let entry_bottom = py.saturating_add(ph);
+        if entry_bottom <= scroll || py >= scroll.saturating_add(view_h) {
+            continue;
+        }
+        let visible_top = py.saturating_sub(scroll);
+        let visible_bottom = entry_bottom
+            .min(scroll.saturating_add(view_h))
+            .saturating_sub(scroll);
+        let visible_h = visible_bottom.saturating_sub(visible_top);
+        let pane_rect = Rect {
+            x: area.x,
+            y: area.y.saturating_add(visible_top),
+            width: area.width,
+            height: visible_h,
+        };
+
+        let (pane_clone, info_clone) = {
+            let (p, info) = &state.repo_groups[e.group_idx].panes[e.pane_idx];
+            (p.clone(), info.clone())
+        };
+        let pane_id = pane_clone.pane_id.clone();
+        let is_selected = i == selected;
+
+        let expanded = state.tile_all_expanded || is_selected;
+        if expanded && pane_rect.height >= EXPANDED_H {
+            draw_pane_expanded(frame, state, pane_rect, &pane_clone, &info_clone);
+        } else {
+            // Either not selected, or selected but partly clipped — render
+            // just the summary line at the top of the visible area.
+            let line_rect = Rect {
+                x: pane_rect.x,
+                y: pane_rect.y,
+                width: pane_rect.width,
+                height: 1,
+            };
+            draw_pane_collapsed(
+                frame,
+                state,
+                line_rect,
+                &pane_clone,
+                &info_clone,
+                is_selected,
+            );
+        }
+
+        state.layout.tile_targets.push(crate::state::TileTarget {
+            rect: pane_rect,
+            pane_id,
+            row: i,
+            col: 0,
+        });
+    }
+}
+
+/// One-line collapsed summary of a pane.
+fn draw_pane_collapsed(
+    frame: &mut Frame,
+    state: &AppState,
+    area: Rect,
+    pane: &PaneInfo,
+    info: &crate::group::PaneGitInfo,
+    selected: bool,
+) {
+    if area.width < 4 || area.height < 1 {
+        return;
+    }
+    let icon = state.icons.status_icon(&pane.status).to_string();
+    let status_color = pane_status_color(state, pane);
+    let attention =
+        pane.attention || matches!(pane.status, PaneStatus::Waiting | PaneStatus::Error);
+    let label = pane_label(pane, info);
+    let summary = pane_summary_text(pane);
+    let status_label = pane_status_label(&pane.status, attention);
+
+    let prefix_str = if selected { "▌ " } else { "  " };
+    let prefix_color = if selected {
+        state.theme.accent
+    } else {
+        state.theme.border_inactive
+    };
+
+    // Reserve fixed columns for prefix(2), icon(2), glyph(2), label(20).
+    let width = area.width as usize;
+    const PREFIX_W: usize = 2;
+    const ICON_W: usize = 2;
+    const GLYPH_W: usize = 2;
+    const LABEL_W: usize = 20;
+    const STATUS_W: usize = 12;
+    let summary_w =
+        width.saturating_sub(PREFIX_W + ICON_W + GLYPH_W + LABEL_W + 2 /* gap */ + STATUS_W);
+
+    let label_trim = truncate_to_width(&label, LABEL_W);
+    let label_padded = format!("{label_trim:<LABEL_W$}");
+    let summary_trim = truncate_to_width(&summary, summary_w);
+
+    let mut spans: Vec<Span> = vec![
+        Span::styled(prefix_str.to_string(), Style::default().fg(prefix_color)),
+        Span::styled(format!("{icon} "), Style::default().fg(status_color)),
+        Span::styled(
+            format!("{} ", pane.agent.glyph()),
+            Style::default().fg(agent_color(state, &pane.agent)),
+        ),
+        Span::styled(
+            label_padded,
+            Style::default()
+                .fg(state.theme.branch)
+                .add_modifier(if selected {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
+        ),
+        Span::raw("  "),
+        Span::styled(summary_trim, Style::default().fg(state.theme.text_muted)),
+    ];
+
+    // Right-aligned status indicator (running/idle/etc) + attention.
+    let used: usize = spans
+        .iter()
+        .map(|s| super::text::display_width(&s.content))
+        .sum();
+    let trailing = if attention {
+        format!("{status_label} ▲")
+    } else {
+        status_label.to_string()
+    };
+    let trailing_w = super::text::display_width(&trailing);
+    let pad = width.saturating_sub(used + trailing_w);
+    if pad > 0 {
+        spans.push(Span::raw(" ".repeat(pad)));
+    }
+    spans.push(Span::styled(
+        trailing,
+        Style::default()
+            .fg(if attention {
+                state.theme.badge_danger
+            } else {
+                status_color
+            })
+            .add_modifier(Modifier::BOLD),
+    ));
+
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+/// Expanded pane (1 summary line + body lines, indented with `│` bar).
+fn draw_pane_expanded(
+    frame: &mut Frame,
+    state: &AppState,
+    area: Rect,
+    pane: &PaneInfo,
+    info: &crate::group::PaneGitInfo,
+) {
+    if area.height == 0 {
+        return;
+    }
+    // Top line: same as collapsed but selected.
+    let summary_rect = Rect {
+        x: area.x,
+        y: area.y,
+        width: area.width,
+        height: 1,
+    };
+    draw_pane_collapsed(frame, state, summary_rect, pane, info, true);
+
+    if area.height < 2 {
+        return;
+    }
+
+    let body_h = area.height - 1;
+    let bar_color = state.theme.accent;
+    let inner_x = area.x.saturating_add(4); // "    " indent (matches "  " prefix + "│ ")
+    let inner_w = area.width.saturating_sub(4);
+
+    let prompt = if !pane.prompt.is_empty() {
+        pane.prompt.clone()
+    } else if !pane.current_command.is_empty() {
+        pane.current_command.clone()
+    } else if !pane.wait_reason.is_empty() {
+        pane.wait_reason.clone()
+    } else {
+        "—".into()
+    };
+    let prompt_trim = truncate_to_width(&prompt, inner_w as usize);
+
+    let permission = pane.permission_mode.badge();
+    let mut footer_spans: Vec<Span> = Vec::new();
+    if !pane.wait_reason.is_empty() {
+        footer_spans.push(Span::styled(
+            pane.wait_reason.clone(),
+            Style::default().fg(state.theme.wait_reason),
+        ));
+        footer_spans.push(Span::raw("  ·  "));
+    }
+    if !permission.is_empty() {
+        footer_spans.push(Span::styled(
+            permission.to_string(),
+            Style::default().fg(state.theme.badge_auto),
+        ));
+        footer_spans.push(Span::raw("  ·  "));
+    }
+    let started = pane
+        .started_at
+        .map(|s| format!("started @ {s}"))
+        .unwrap_or_default();
+    if !started.is_empty() {
+        footer_spans.push(Span::styled(
+            started,
+            Style::default().fg(state.theme.text_inactive),
+        ));
+    }
+
+    // Body lines, each prefixed with the `│` bar.
+    let bar = Span::styled("  │ ", Style::default().fg(bar_color));
+
+    if body_h >= 1 {
+        let line = Line::from(vec![
+            bar.clone(),
+            Span::styled(prompt_trim, Style::default().fg(state.theme.text_active)),
+        ]);
+        let row = Rect {
+            x: area.x,
+            y: area.y.saturating_add(1),
+            width: area.width,
+            height: 1,
+        };
+        frame.render_widget(Paragraph::new(line), row);
+    }
+    if body_h >= 2 && !footer_spans.is_empty() {
+        let mut line_spans = vec![bar];
+        line_spans.extend(footer_spans);
+        let row = Rect {
+            x: area.x,
+            y: area.y.saturating_add(2),
+            width: area.width,
+            height: 1,
+        };
+        frame.render_widget(Paragraph::new(Line::from(line_spans)), row);
+    }
+
+    // Silence unused warning when inner_x is shadowed by the bar approach.
+    let _ = inner_x;
+}
+
+fn pane_status_color(state: &AppState, pane: &PaneInfo) -> ratatui::style::Color {
+    match pane.status {
+        PaneStatus::Running => state.theme.status_running,
+        PaneStatus::Background => state.theme.status_running,
+        PaneStatus::Waiting => state.theme.status_waiting,
+        PaneStatus::Idle => state.theme.status_idle,
+        PaneStatus::Error => state.theme.status_error,
+        PaneStatus::Unknown => state.theme.status_unknown,
+    }
+}
+
+fn pane_status_label(status: &PaneStatus, attention: bool) -> &'static str {
+    if attention {
+        return "attn";
+    }
+    match status {
+        PaneStatus::Running => "running",
+        PaneStatus::Background => "bg",
+        PaneStatus::Waiting => "waiting",
+        PaneStatus::Idle => "idle",
+        PaneStatus::Error => "error",
+        PaneStatus::Unknown => "—",
+    }
+}
+
+/// Best label for the row — Claude session name first, then git branch.
+fn pane_label(pane: &PaneInfo, info: &crate::group::PaneGitInfo) -> String {
     if !pane.session_name.is_empty() {
         return pane.session_name.clone();
     }
@@ -817,139 +1193,22 @@ fn tile_label(pane: &PaneInfo, info: &crate::group::PaneGitInfo) -> String {
     if let Some(w) = info.worktree_name.as_ref().filter(|s| !s.is_empty()) {
         return w.clone();
     }
-    if !pane.path.is_empty()
-        && let Some(base) = std::path::Path::new(&pane.path)
-            .file_name()
-            .and_then(|s| s.to_str())
-        && !base.is_empty()
-    {
-        return base.to_string();
-    }
-    pane.pane_id.clone()
+    "-".into()
 }
 
-const TILE_TARGET_W: u16 = 38;
-const TILE_H: u16 = 6;
-const TILE_GAP_V: u16 = 1;
-const GROUP_HEADER_H: u16 = 1;
-const GROUP_SPACER_H: u16 = 1;
-
-fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
-    state.layout.tile_targets.clear();
-    state.layout.tile_cols = 0;
-    state.layout.tile_visible_first = 0;
-    state.layout.tile_visible_last = 0;
-
-    if state.repo_groups.is_empty() || state.repo_groups.iter().all(|g| g.panes.is_empty()) {
-        let para = Paragraph::new(Line::from(Span::styled(
-            "  no agents to show",
-            Style::default().fg(state.theme.text_muted),
-        )));
-        frame.render_widget(para, area);
-        return;
+/// Short summary text for the collapsed row — prompt / command / wait reason.
+fn pane_summary_text(pane: &PaneInfo) -> String {
+    if !pane.prompt.is_empty() {
+        return pane.prompt.clone();
     }
-
-    let cols = (area.width / TILE_TARGET_W).max(1) as usize;
-    state.layout.tile_cols = cols;
-
-    // Clamp scroll to a valid group index.
-    let last_group = state.repo_groups.len().saturating_sub(1);
-    if state.tile_scroll_group > last_group {
-        state.tile_scroll_group = last_group;
+    if !pane.current_command.is_empty() {
+        return pane.current_command.clone();
     }
-
-    let mut constraints: Vec<Constraint> = Vec::new();
-    let mut group_indices: Vec<usize> = Vec::new();
-    let mut used: u16 = 0;
-    for (idx, group) in state
-        .repo_groups
-        .iter()
-        .enumerate()
-        .skip(state.tile_scroll_group)
-    {
-        if group.panes.is_empty() {
-            continue;
-        }
-        let tile_rows = group.panes.len().div_ceil(cols) as u16;
-        let group_h = GROUP_HEADER_H
-            + tile_rows * TILE_H
-            + tile_rows.saturating_sub(1) * TILE_GAP_V
-            + GROUP_SPACER_H;
-        if used + group_h > area.height && !group_indices.is_empty() {
-            break;
-        }
-        constraints.push(Constraint::Length(group_h));
-        group_indices.push(idx);
-        used = used.saturating_add(group_h);
+    if !pane.wait_reason.is_empty() {
+        return pane.wait_reason.clone();
     }
-    constraints.push(Constraint::Min(0));
-
-    if let (Some(first), Some(last)) = (group_indices.first(), group_indices.last()) {
-        state.layout.tile_visible_first = *first;
-        state.layout.tile_visible_last = *last;
-    }
-
-    let sections = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(constraints)
-        .split(area);
-
-    let col_constraints: Vec<Constraint> = (0..cols)
-        .map(|_| Constraint::Ratio(1, cols as u32))
-        .collect();
-
-    // Clamp selection to the upcoming target count so highlight survives shrinks.
-    let total_tiles: usize = group_indices
-        .iter()
-        .map(|i| state.repo_groups[*i].panes.len())
-        .sum();
-    if state.tile_selected >= total_tiles && total_tiles > 0 {
-        state.tile_selected = total_tiles - 1;
-    }
-
-    let mut global_row: usize = 0;
-    for (slot_idx, group_idx) in group_indices.iter().enumerate() {
-        let group_idx = *group_idx;
-        let section = sections[slot_idx];
-        let parts = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(GROUP_HEADER_H),
-                Constraint::Min(0),
-                Constraint::Length(GROUP_SPACER_H),
-            ])
-            .split(section);
-
-        // Take an immutable snapshot of the bits draw_group_header needs.
-        let group_name = state.repo_groups[group_idx].name.clone();
-        let group_panes_count = state.repo_groups[group_idx].panes.len();
-        let group_attention = state.repo_groups[group_idx]
-            .panes
-            .iter()
-            .filter(|(p, _)| needs_attention(&p.status, p.attention))
-            .count();
-        draw_group_header(
-            frame,
-            state,
-            parts[0],
-            &group_name,
-            group_panes_count,
-            group_attention,
-        );
-
-        let group_rows = group_panes_count.div_ceil(cols);
-        draw_group_tiles(
-            frame,
-            state,
-            parts[1],
-            group_idx,
-            &col_constraints,
-            global_row,
-        );
-        global_row += group_rows;
-    }
+    String::new()
 }
-
 fn draw_group_header(
     frame: &mut Frame,
     state: &AppState,
@@ -991,203 +1250,4 @@ fn draw_group_header(
         ));
     }
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
-}
-
-fn draw_group_tiles(
-    frame: &mut Frame,
-    state: &mut AppState,
-    area: Rect,
-    group_idx: usize,
-    col_constraints: &[Constraint],
-    row_offset: usize,
-) {
-    let cols = col_constraints.len();
-    let panes_len = state.repo_groups[group_idx].panes.len();
-    let rows = panes_len.div_ceil(cols);
-    let mut row_constraints: Vec<Constraint> = Vec::new();
-    for i in 0..rows {
-        row_constraints.push(Constraint::Length(TILE_H));
-        if i + 1 < rows {
-            row_constraints.push(Constraint::Length(TILE_GAP_V));
-        }
-    }
-    let row_areas = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(row_constraints)
-        .split(area);
-
-    for idx in 0..panes_len {
-        let row = idx / cols;
-        let col = idx % cols;
-        let row_area_idx = row * 2;
-        if row_area_idx >= row_areas.len() {
-            break;
-        }
-        let cell_areas = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints(col_constraints.to_vec())
-            .split(row_areas[row_area_idx]);
-        let cell = cell_areas[col];
-        let gutter = if col + 1 < cols { 1 } else { 0 };
-        let padded = Rect {
-            x: cell.x,
-            y: cell.y,
-            width: cell.width.saturating_sub(gutter),
-            height: cell.height,
-        };
-
-        let tile_idx = state.layout.tile_targets.len();
-        let selected = tile_idx == state.tile_selected;
-
-        // Clone what we need so the &mut state borrow for tile_targets push
-        // doesn't conflict with the immutable pane reference passed into draw_tile.
-        let (pane_clone, info_clone) = {
-            let (p, info) = &state.repo_groups[group_idx].panes[idx];
-            (p.clone(), info.clone())
-        };
-        let pane_id = pane_clone.pane_id.clone();
-        draw_tile(frame, state, padded, &pane_clone, &info_clone, selected);
-        state.layout.tile_targets.push(crate::state::TileTarget {
-            rect: padded,
-            pane_id,
-            row: row_offset + row,
-            col,
-        });
-    }
-}
-
-fn draw_tile(
-    frame: &mut Frame,
-    state: &AppState,
-    area: Rect,
-    pane: &PaneInfo,
-    info: &crate::group::PaneGitInfo,
-    selected: bool,
-) {
-    if area.width < 10 || area.height < 4 {
-        return;
-    }
-    let (color, status_label) = match pane.status {
-        PaneStatus::Running => (state.theme.status_running, "running"),
-        PaneStatus::Background => (state.theme.status_running, "background"),
-        PaneStatus::Waiting => (state.theme.status_waiting, "waiting"),
-        PaneStatus::Idle => (state.theme.status_idle, "idle"),
-        PaneStatus::Error => (state.theme.status_error, "error"),
-        PaneStatus::Unknown => (state.theme.status_unknown, "—"),
-    };
-
-    let attention =
-        pane.attention || matches!(pane.status, PaneStatus::Waiting | PaneStatus::Error);
-    let border_color = if selected {
-        state.theme.accent
-    } else if attention {
-        state.theme.badge_danger
-    } else {
-        state.theme.border_inactive
-    };
-
-    let icon = state.icons.status_icon(&pane.status);
-    let branch = tile_label(pane, info);
-
-    // Left accent strip (2 cols) + card body.
-    let split = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(2), Constraint::Min(0)])
-        .split(area);
-    let accent_area = split[0];
-    let body_area = split[1];
-
-    let accent_lines: Vec<Line> = (0..accent_area.height)
-        .map(|_| Line::from(Span::styled("▎", Style::default().fg(color))))
-        .collect();
-    frame.render_widget(Paragraph::new(accent_lines), accent_area);
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(if selected {
-            BorderType::Thick
-        } else {
-            BorderType::Rounded
-        })
-        .padding(Padding::horizontal(1))
-        .title(Line::from(vec![
-            Span::raw(" "),
-            Span::styled(icon.to_string(), Style::default().fg(color)),
-            Span::raw(" "),
-            Span::styled(
-                pane.agent.glyph(),
-                Style::default().fg(agent_color(state, &pane.agent)),
-            ),
-            Span::raw(" "),
-            Span::styled(
-                format!("{branch} "),
-                Style::default().fg(color).add_modifier(Modifier::BOLD),
-            ),
-        ]))
-        .style(Style::default().fg(border_color));
-    let inner = block.inner(body_area);
-    frame.render_widget(block, body_area);
-
-    let width = inner.width as usize;
-
-    let prompt = if !pane.prompt.is_empty() {
-        pane.prompt.clone()
-    } else if !pane.current_command.is_empty() {
-        pane.current_command.clone()
-    } else if !pane.wait_reason.is_empty() {
-        pane.wait_reason.clone()
-    } else {
-        "—".into()
-    };
-
-    let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(Span::styled(
-        truncate_to_width(&prompt, width),
-        Style::default().fg(state.theme.text_active),
-    )));
-
-    let badge = pane.permission_mode.badge();
-    let mut footer: Vec<Span> = vec![Span::styled(
-        status_label.to_string(),
-        Style::default().fg(color).add_modifier(Modifier::BOLD),
-    )];
-    if !badge.is_empty() {
-        footer.push(Span::raw("  "));
-        footer.push(Span::styled(
-            badge.to_string(),
-            Style::default().fg(state.theme.badge_auto),
-        ));
-    }
-    if attention {
-        let used: usize = footer
-            .iter()
-            .map(|s| super::text::display_width(&s.content))
-            .sum();
-        let attention_text = if pane.wait_reason.is_empty() {
-            "▲".to_string()
-        } else {
-            format!(
-                "▲ {}",
-                truncate_to_width(&pane.wait_reason, width.saturating_sub(used + 4))
-            )
-        };
-        let attn_w = super::text::display_width(&attention_text);
-        let pad = width.saturating_sub(used + attn_w);
-        if pad > 0 {
-            footer.push(Span::raw(" ".repeat(pad)));
-        }
-        footer.push(Span::styled(
-            attention_text,
-            Style::default()
-                .fg(state.theme.badge_danger)
-                .add_modifier(Modifier::BOLD),
-        ));
-    }
-
-    while lines.len() + 1 < inner.height as usize {
-        lines.push(Line::raw(""));
-    }
-    lines.push(Line::from(footer));
-
-    frame.render_widget(Paragraph::new(lines), inner);
 }
