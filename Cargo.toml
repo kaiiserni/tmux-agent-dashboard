@@ -1,0 +1,23 @@
+[package]
+name = "tmux-agent-dashboard"
+version = "0.1.0"
+edition = "2024"
+description = "tmux popup dashboard for Claude Code / Codex agents (consumes tmux-agent-sidebar state)"
+license = "MIT"
+
+[[bin]]
+name = "tmux-agent-dashboard"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "=0.30.0"
+crossterm = "=0.29.0"
+unicode-width = "=0.2.2"
+unicode-truncate = "=2.0.1"
+libc = "=0.2.186"
+indexmap = "=2.14.0"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1

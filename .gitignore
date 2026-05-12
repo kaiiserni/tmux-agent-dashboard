@@ -1,0 +1,8 @@
+/target
+/bin/*
+!/bin/.gitkeep
+Cargo.lock
+*.swp
+*.bak
+.DS_Store
+/tmp/
