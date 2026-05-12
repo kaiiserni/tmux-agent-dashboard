@@ -1,15 +1,62 @@
+use std::time::{Duration, Instant};
+
 use super::AppState;
-use crate::group::group_panes_by_repo;
+use crate::group::group_panes_with_cache;
+use crate::session;
 use crate::tmux::{self, PaneStatus};
+
+/// Re-scan `~/.claude/sessions/*.json` at most once per this interval.
+const SESSION_NAMES_TTL: Duration = Duration::from_secs(10);
 
 impl AppState {
     /// Pull a fresh `list-panes` snapshot, regroup by repo, and apply the
     /// attention-first sort.
     pub fn refresh(&mut self) {
         let sessions = tmux::query_sessions();
-        self.repo_groups = group_panes_by_repo(&sessions);
+        self.repo_groups = group_panes_with_cache(&sessions, &mut self.git_cache);
+        self.refresh_session_names();
+        self.apply_session_names();
         crate::pending::sweep_stale_marks(&mut self.repo_groups);
         self.sort_groups_if_needed();
+    }
+
+    /// Refresh the cached Claude session-name map, but only when stale.
+    /// Sticky: an empty scan never overwrites a non-empty cache (so a
+    /// transient FS hiccup can't blank labels).
+    fn refresh_session_names(&mut self) {
+        let now = Instant::now();
+        let stale = self
+            .session_names_refreshed_at
+            .is_none_or(|t| now.duration_since(t) >= SESSION_NAMES_TTL);
+        if !stale {
+            return;
+        }
+        let fresh = session::scan_session_names();
+        self.session_names_refreshed_at = Some(now);
+        if !fresh.is_empty() || self.session_names.is_empty() {
+            self.session_names = fresh;
+        }
+    }
+
+    /// Patch each pane's `session_name` from the cached lookup. Only
+    /// applied when the pane has a known `session_id` and no name yet,
+    /// so explicit tmux session names still win.
+    fn apply_session_names(&mut self) {
+        if self.session_names.is_empty() {
+            return;
+        }
+        for group in &mut self.repo_groups {
+            for (pane, _) in &mut group.panes {
+                if !pane.session_name.is_empty() {
+                    continue;
+                }
+                if let Some(sid) = pane.session_id.as_deref()
+                    && let Some(name) = self.session_names.get(sid)
+                {
+                    pane.session_name = name.clone();
+                }
+            }
+        }
     }
 
     /// Attention-first sort: panes the user might want to look at bubble

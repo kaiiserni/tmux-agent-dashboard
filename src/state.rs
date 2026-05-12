@@ -52,6 +52,15 @@ pub struct AppState {
     pub summary_scroll_idle: usize,
     /// Set by `q` / `Esc` handlers to break out of the event loop cleanly.
     pub should_exit: bool,
+    /// Cross-refresh cache of resolved git info per pane path. Keeps
+    /// branch labels stable when git transiently fails (lockfile, slow
+    /// disk).
+    pub git_cache: crate::group::GitInfoCache,
+    /// Cached `~/.claude/sessions/*.json` lookup (session_id -> name).
+    pub session_names: std::collections::HashMap<String, String>,
+    /// Last time `session_names` was rescanned. The scan reruns at most
+    /// once every 10 seconds.
+    pub session_names_refreshed_at: Option<std::time::Instant>,
 }
 
 impl AppState {
@@ -76,6 +85,9 @@ impl AppState {
             summary_scroll_marked_unread: 0,
             summary_scroll_idle: 0,
             should_exit: false,
+            git_cache: crate::group::GitInfoCache::new(),
+            session_names: std::collections::HashMap::new(),
+            session_names_refreshed_at: None,
         }
     }
 }

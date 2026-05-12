@@ -5,6 +5,7 @@ pub mod cli;
 pub mod event;
 pub mod group;
 pub mod pending;
+pub mod session;
 pub mod state;
 pub mod time;
 pub mod tmux;

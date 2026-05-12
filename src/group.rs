@@ -1,6 +1,17 @@
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
 use indexmap::IndexMap;
 
 use crate::tmux::PaneInfo;
+
+/// Max age before a cached `PaneGitInfo` entry is re-resolved.
+/// Refresh fires every second; without this the dashboard would shell out
+/// to `git` for every pane on every tick.
+const GIT_CACHE_TTL: Duration = Duration::from_secs(30);
+
+/// Per-path cache of resolved git info. Keyed by pane path.
+pub type GitInfoCache = HashMap<String, (PaneGitInfo, Instant)>;
 
 /// Per-pane git metadata resolved from the pane's working directory.
 /// The dashboard reads this in a single batch (one git call per unique
@@ -67,22 +78,69 @@ fn resolve_pane_git_info(path: &str) -> PaneGitInfo {
     }
 }
 
-pub fn group_panes_by_repo(sessions: &[crate::tmux::SessionInfo]) -> Vec<RepoGroup> {
+/// Returns true when the newly-resolved info is a "better" value than what
+/// we previously had cached. Used to keep a known-good branch label even
+/// when git transiently returns nothing (lockfile contention, slow disk,
+/// etc.). Without this, the per-row label visibly cycles between the
+/// session name, the branch, and the path basename across refreshes.
+fn is_better_git_info(new: &PaneGitInfo, old: &PaneGitInfo) -> bool {
+    let new_has_branch = new.branch.as_deref().is_some_and(|b| !b.trim().is_empty());
+    let old_has_branch = old.branch.as_deref().is_some_and(|b| !b.trim().is_empty());
+    if new_has_branch && !old_has_branch {
+        return true;
+    }
+    if !new_has_branch && old_has_branch {
+        return false;
+    }
+    // Both have (or both lack) a branch; prefer the newer if it now also
+    // resolves a repo_root that we didn't have before.
+    let new_has_root = new.repo_root.as_deref().is_some_and(|r| !r.is_empty());
+    let old_has_root = old.repo_root.as_deref().is_some_and(|r| !r.is_empty());
+    new_has_root || !old_has_root
+}
+
+/// Look up `path` in the cache, refreshing it from `git` if the entry is
+/// missing or stale. Honors the sticky rule from `is_better_git_info`.
+fn cached_git_info(cache: &mut GitInfoCache, path: &str) -> PaneGitInfo {
+    let now = Instant::now();
+    if let Some((info, stamp)) = cache.get(path)
+        && now.duration_since(*stamp) < GIT_CACHE_TTL
+    {
+        return info.clone();
+    }
+    let fresh = resolve_pane_git_info(path);
+    match cache.get(path).cloned() {
+        Some((old, _)) => {
+            if is_better_git_info(&fresh, &old) {
+                cache.insert(path.to_string(), (fresh.clone(), now));
+                fresh
+            } else {
+                // Keep the known-good value but refresh the timestamp so
+                // we don't re-shell every tick when git keeps failing.
+                cache.insert(path.to_string(), (old.clone(), now));
+                old
+            }
+        }
+        None => {
+            cache.insert(path.to_string(), (fresh.clone(), now));
+            fresh
+        }
+    }
+}
+
+/// Group panes by repository, reusing entries from the supplied cache.
+/// Callers that don't have access to long-lived state should use
+/// [`group_panes_by_repo`] instead.
+pub fn group_panes_with_cache(
+    sessions: &[crate::tmux::SessionInfo],
+    cache: &mut GitInfoCache,
+) -> Vec<RepoGroup> {
     let mut groups: IndexMap<String, RepoGroup> = IndexMap::new();
-    let mut git_cache: std::collections::HashMap<String, PaneGitInfo> =
-        std::collections::HashMap::new();
 
     for session in sessions {
         for window in &session.windows {
             for pane in &window.panes {
-                let mut git_info = match git_cache.get(pane.path.as_str()) {
-                    Some(cached) => cached.clone(),
-                    None => {
-                        let resolved = resolve_pane_git_info(&pane.path);
-                        git_cache.insert(pane.path.clone(), resolved.clone());
-                        resolved
-                    }
-                };
+                let mut git_info = cached_git_info(cache, &pane.path);
 
                 if !pane.worktree.name.is_empty() {
                     git_info.worktree_name = Some(pane.worktree.name.clone());
@@ -122,4 +180,13 @@ pub fn group_panes_by_repo(sessions: &[crate::tmux::SessionInfo]) -> Vec<RepoGro
     let mut result: Vec<RepoGroup> = groups.into_values().collect();
     result.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     result
+}
+
+/// One-shot grouping for callers without long-lived state (e.g. the
+/// `pending` CLI subcommand). Uses a throwaway cache so a single
+/// invocation still avoids duplicate git calls across panes that share
+/// a path.
+pub fn group_panes_by_repo(sessions: &[crate::tmux::SessionInfo]) -> Vec<RepoGroup> {
+    let mut cache = GitInfoCache::new();
+    group_panes_with_cache(sessions, &mut cache)
 }
