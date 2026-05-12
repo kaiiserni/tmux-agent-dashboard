@@ -219,13 +219,36 @@ fn needs_attention(status: &PaneStatus, attention: bool) -> bool {
     attention || matches!(status, PaneStatus::Waiting | PaneStatus::Error)
 }
 
-fn draw_attention(frame: &mut Frame, state: &mut AppState, area: Rect) {
-    let block = block_with_title(state, "needs attention");
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+/// Priority key for ordering Summary-tab rows: attention-flagged first,
+/// then by status urgency (Waiting > Error > Idle > Running >
+/// Background > Unknown), then most-recent start time first. The Tiles
+/// tab does NOT use this — its group order stays alphabetical so `d`/`u`
+/// navigation is stable.
+fn pane_priority_key(p: &PaneInfo) -> (u8, u8, std::cmp::Reverse<u64>) {
+    let attention = if p.attention { 0 } else { 1 };
+    let status = match p.status {
+        PaneStatus::Waiting => 0,
+        PaneStatus::Error => 1,
+        PaneStatus::Idle => 2,
+        PaneStatus::Running => 3,
+        PaneStatus::Background => 3,
+        PaneStatus::Unknown => 4,
+    };
+    (
+        attention,
+        status,
+        std::cmp::Reverse(p.started_at.unwrap_or(0)),
+    )
+}
 
-    // Collect attention-flagged panes (notification / permission_denied / teammate_idle).
-    let rows: Vec<SummaryRow> = state
+/// Collect `(group_name, pane, info)` triples across every group, sorted
+/// by pane priority (urgent first). Use for the Summary tab so the Idle
+/// / Waiting / etc. lists show the most-urgent panes first regardless of
+/// which repo they belong to.
+fn sorted_summary_panes(
+    state: &AppState,
+) -> Vec<(String, &PaneInfo, &crate::group::PaneGitInfo)> {
+    let mut v: Vec<_> = state
         .repo_groups
         .iter()
         .flat_map(|g| {
@@ -233,6 +256,19 @@ fn draw_attention(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 .iter()
                 .map(move |(p, info)| (g.name.clone(), p, info))
         })
+        .collect();
+    v.sort_by(|a, b| pane_priority_key(a.1).cmp(&pane_priority_key(b.1)));
+    v
+}
+
+fn draw_attention(frame: &mut Frame, state: &mut AppState, area: Rect) {
+    let block = block_with_title(state, "needs attention");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Collect attention-flagged panes (notification / permission_denied / teammate_idle).
+    let rows: Vec<SummaryRow> = sorted_summary_panes(state)
+        .into_iter()
         .filter(|(_, p, _)| p.attention)
         .map(|(group_name, p, info)| {
             let branch = resolve_branch(p, info);
@@ -270,14 +306,8 @@ fn draw_waiting(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let rows: Vec<SummaryRow> = state
-        .repo_groups
-        .iter()
-        .flat_map(|g| {
-            g.panes
-                .iter()
-                .map(move |(p, info)| (g.name.clone(), p, info))
-        })
+    let rows: Vec<SummaryRow> = sorted_summary_panes(state)
+        .into_iter()
         .filter(|(_, p, _)| matches!(p.status, PaneStatus::Waiting | PaneStatus::Error))
         .map(|(group_name, p, info)| {
             let branch = resolve_branch(p, info);
@@ -321,14 +351,8 @@ fn draw_running(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let rows: Vec<SummaryRow> = state
-        .repo_groups
-        .iter()
-        .flat_map(|g| {
-            g.panes
-                .iter()
-                .map(move |(p, info)| (g.name.clone(), p, info))
-        })
+    let rows: Vec<SummaryRow> = sorted_summary_panes(state)
+        .into_iter()
         .filter(|(_, p, _)| matches!(p.status, PaneStatus::Running | PaneStatus::Background))
         .map(|(group_name, p, info)| {
             let branch = resolve_branch(p, info);
@@ -553,14 +577,8 @@ fn draw_responded(frame: &mut Frame, state: &mut AppState, area: Rect) {
     // focused the pane (= unseen reply). Running panes naturally bump
     // the log too, so we restrict to status == Idle to avoid overlap
     // with the Running list. Sorted newest-first by mtime.
-    let mut rows: Vec<(SummaryRow, std::time::SystemTime)> = state
-        .repo_groups
-        .iter()
-        .flat_map(|g| {
-            g.panes
-                .iter()
-                .map(move |(p, info)| (g.name.clone(), p, info))
-        })
+    let mut rows: Vec<(SummaryRow, std::time::SystemTime)> = sorted_summary_panes(state)
+        .into_iter()
         .filter(|(_, p, _)| matches!(p.status, PaneStatus::Idle) && pane_is_unseen(p))
         .map(|(group_name, p, info)| {
             let branch = resolve_branch(p, info);
@@ -616,14 +634,8 @@ fn draw_marked_unread(frame: &mut Frame, state: &mut AppState, area: Rect) {
     // Pinned-by-user panes that are still purely Idle (the cleanup sweep
     // in state.refresh() drops marks the moment a pane gets busy again).
     // Sorted newest-marked first.
-    let mut rows: Vec<(SummaryRow, u64)> = state
-        .repo_groups
-        .iter()
-        .flat_map(|g| {
-            g.panes
-                .iter()
-                .map(move |(p, info)| (g.name.clone(), p, info))
-        })
+    let mut rows: Vec<(SummaryRow, u64)> = sorted_summary_panes(state)
+        .into_iter()
         .filter(|(_, p, _)| {
             matches!(p.status, PaneStatus::Idle)
                 && !p.attention
@@ -674,14 +686,8 @@ fn draw_idle(frame: &mut Frame, state: &mut AppState, area: Rect) {
 
     // Idle panes the user has already viewed. Unseen replies appear in
     // the Responded list instead.
-    let mut rows: Vec<(SummaryRow, std::time::SystemTime)> = state
-        .repo_groups
-        .iter()
-        .flat_map(|g| {
-            g.panes
-                .iter()
-                .map(move |(p, info)| (g.name.clone(), p, info))
-        })
+    let mut rows: Vec<(SummaryRow, std::time::SystemTime)> = sorted_summary_panes(state)
+        .into_iter()
         .filter(|(_, p, _)| {
             matches!(p.status, PaneStatus::Idle)
                 && !pane_is_unseen(p)
