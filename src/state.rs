@@ -40,12 +40,10 @@ pub struct AppState {
     /// view. Bumped when navigation moves selection past the visible
     /// range.
     pub tile_scroll_group: usize,
-    /// Key (unique path) of the single group currently rendered expanded
-    /// in the Tiles view. All other groups show only their header line.
+    /// Name of the single group currently rendered expanded in the
+    /// Tiles view. All other groups show only their header line.
     /// `None` = every group is folded (manual collapse-all). On first
     /// render with `None`, the first non-empty group is auto-expanded.
-    /// Stored by key, not display name, because two groups can share a
-    /// display name (e.g. multiple bare-repo worktrees named `main`).
     pub expanded_group: Option<String>,
     /// Currently-selected row in the Summary view (index into `summary_targets`).
     pub summary_selected: usize,

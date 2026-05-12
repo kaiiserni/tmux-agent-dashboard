@@ -875,7 +875,7 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
         if group.panes.is_empty() {
             continue;
         }
-        let folded = state.expanded_group.as_deref() != Some(group.key.as_str());
+        let folded = state.expanded_group.as_deref() != Some(group.name.as_str());
         let group_h = if folded {
             GROUP_HEADER_H + GROUP_SPACER_H
         } else {
@@ -912,11 +912,11 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
     // expanded group's absolute pane range. If it isn't (e.g. just
     // switched groups, or the expanded group's pane list shrank),
     // snap to that group's first pane.
-    if let Some(expanded_key) = state.expanded_group.clone() {
+    if let Some(expanded_name) = state.expanded_group.clone() {
         let mut start = 0usize;
         let mut hit: Option<(usize, usize)> = None;
         for group in &state.repo_groups {
-            if group.key == expanded_key {
+            if group.name == expanded_name {
                 hit = Some((start, group.panes.len()));
                 break;
             }
@@ -935,8 +935,7 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
         let group_idx = *group_idx;
         let section = sections[slot_idx];
         let group_name = state.repo_groups[group_idx].name.clone();
-        let group_key = state.repo_groups[group_idx].key.clone();
-        let folded = state.expanded_group.as_deref() != Some(group_key.as_str());
+        let folded = state.expanded_group.as_deref() != Some(group_name.as_str());
 
         if folded {
             // Header only — skip the grid body.

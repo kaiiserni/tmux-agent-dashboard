@@ -274,7 +274,7 @@ fn toggle_fold_all(state: &mut AppState) {
             .repo_groups
             .iter()
             .find(|g| !g.panes.is_empty())
-            .map(|g| g.key.clone());
+            .map(|g| g.name.clone());
     }
 }
 
@@ -289,17 +289,17 @@ fn toggle_fold_current(state: &mut AppState, _cur: usize) {
 /// every group) is preserved. Initialization to the first group is
 /// done once in `setup::init_state`, not on every refresh.
 pub fn ensure_expanded_group(state: &mut AppState) {
-    if let Some(key) = state.expanded_group.clone() {
+    if let Some(name) = state.expanded_group.clone() {
         let valid = state
             .repo_groups
             .iter()
-            .any(|g| g.key == key && !g.panes.is_empty());
+            .any(|g| g.name == name && !g.panes.is_empty());
         if !valid {
             state.expanded_group = state
                 .repo_groups
                 .iter()
                 .find(|g| !g.panes.is_empty())
-                .map(|g| g.key.clone());
+                .map(|g| g.name.clone());
         }
     }
 }
@@ -312,7 +312,7 @@ pub fn init_expanded_group(state: &mut AppState) {
             .repo_groups
             .iter()
             .find(|g| !g.panes.is_empty())
-            .map(|g| g.key.clone());
+            .map(|g| g.name.clone());
     }
 }
 
@@ -350,7 +350,7 @@ fn switch_to_group(state: &mut AppState, g_idx: usize, to_last: bool) {
     if group.panes.is_empty() {
         return;
     }
-    state.expanded_group = Some(group.key.clone());
+    state.expanded_group = Some(group.name.clone());
     let base = first_pane_abs_in_group(state, g_idx);
     state.tile_selected = if to_last {
         base + group.panes.len() - 1
