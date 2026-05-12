@@ -36,12 +36,14 @@ pub struct AppState {
     pub dashboard_tab: DashboardTab,
     /// Currently-selected tile in the Tiles view (index into `tile_targets`).
     pub tile_selected: usize,
-    /// Vertical scroll offset (rows) in the accordion Tiles view.
-    /// Adjusted automatically to keep the selected pane visible.
-    pub tile_scroll_row: u16,
-    /// When true, all panes in the Tiles view render expanded
-    /// (vs. only the selected one). Toggled with `f`.
-    pub tile_all_expanded: bool,
+    /// Group index of the first group rendered at the top of the Tiles
+    /// view. Bumped when navigation moves selection past the visible
+    /// range.
+    pub tile_scroll_group: usize,
+    /// Names of groups currently folded (collapsed) in the Tiles view.
+    /// Folded groups render only the header line; their tiles are
+    /// skipped during render and navigation.
+    pub folded_groups: std::collections::HashSet<String>,
     /// Currently-selected row in the Summary view (index into `summary_targets`).
     pub summary_selected: usize,
     pub summary_scroll_attention: usize,
@@ -75,8 +77,8 @@ impl AppState {
             icons: StatusIcons::default(),
             dashboard_tab: DashboardTab::Summary,
             tile_selected: 0,
-            tile_scroll_row: 0,
-            tile_all_expanded: false,
+            tile_scroll_group: 0,
+            folded_groups: std::collections::HashSet::new(),
             summary_selected: 0,
             summary_scroll_attention: 0,
             summary_scroll_waiting: 0,
