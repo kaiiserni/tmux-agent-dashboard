@@ -28,6 +28,16 @@ impl CodexAdapter {
             matcher: None,
             kind: AgentEventKind::ActivityLog,
         },
+        HookRegistration {
+            trigger: "Notification",
+            matcher: None,
+            kind: AgentEventKind::Notification,
+        },
+        HookRegistration {
+            trigger: "PermissionRequest",
+            matcher: None,
+            kind: AgentEventKind::Notification,
+        },
     ];
 }
 
@@ -73,6 +83,29 @@ impl EventAdapter for CodexAdapter {
                     tool_response: json_value_or_null(input, "tool_response"),
                 })
             }
+            "notification" => {
+                let wait_reason = json_str(input, "notification_type");
+                Some(AgentEvent::Notification {
+                    agent: CODEX_AGENT.into(),
+                    cwd: json_str(input, "cwd").into(),
+                    permission_mode: json_str(input, "permission_mode").into(),
+                    wait_reason: wait_reason.into(),
+                    meta_only: false,
+                    worktree: None,
+                    agent_id: None,
+                    session_id: optional_str(input, "session_id"),
+                })
+            }
+            "permission-request" => Some(AgentEvent::Notification {
+                agent: CODEX_AGENT.into(),
+                cwd: json_str(input, "cwd").into(),
+                permission_mode: json_str(input, "permission_mode").into(),
+                wait_reason: "permission_request".into(),
+                meta_only: false,
+                worktree: None,
+                agent_id: None,
+                session_id: optional_str(input, "session_id"),
+            }),
             _ => None,
         }
     }
