@@ -881,7 +881,8 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
         if group.panes.is_empty() {
             continue;
         }
-        let folded = state.expanded_group.as_deref() != Some(group.key.as_str());
+        let folded = !state.expand_all_groups
+            && state.expanded_group.as_deref() != Some(group.key.as_str());
         let group_h = if folded {
             GROUP_HEADER_H + GROUP_SPACER_H
         } else {
@@ -914,9 +915,14 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
         .map(|_| Constraint::Ratio(1, cols as u32))
         .collect();
 
-    // One-group-expanded model: `tile_selected` is a local index into the
-    // expanded group's panes (0..len). Clamp if the expanded group shrank.
-    if let Some(expanded_key) = state.expanded_group.clone()
+    // `tile_selected` is an index into the about-to-be-rebuilt
+    // `tile_targets`. In single-group mode that means 0..expanded.panes.len();
+    // in `expand_all_groups` mode it's 0..total visible tiles. The
+    // per-tile clamp happens naturally in the input handler. Here we
+    // only need to make sure a freshly-switched group with a shrunk pane
+    // list doesn't leave selection pointing past the new last tile.
+    if !state.expand_all_groups
+        && let Some(expanded_key) = state.expanded_group.clone()
         && let Some(group) = state.repo_groups.iter().find(|g| g.key == expanded_key)
         && !group.panes.is_empty()
         && state.tile_selected >= group.panes.len()
@@ -930,7 +936,8 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
         let section = sections[slot_idx];
         let group_name = state.repo_groups[group_idx].name.clone();
         let group_key = state.repo_groups[group_idx].key.clone();
-        let folded = state.expanded_group.as_deref() != Some(group_key.as_str());
+        let folded = !state.expand_all_groups
+            && state.expanded_group.as_deref() != Some(group_key.as_str());
 
         if folded {
             // Header only — skip the grid body.
@@ -1050,6 +1057,7 @@ fn draw_group_tiles(
         state.layout.tile_targets.push(crate::state::TileTarget {
             rect: padded,
             pane_id,
+            group_idx,
             row: row_offset + row,
             col,
         });

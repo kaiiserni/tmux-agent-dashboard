@@ -137,7 +137,8 @@ fn handle_dashboard_tiles_key(state: &mut AppState, code: KeyCode) -> bool {
                 .map(|(i, _)| i)
             {
                 state.tile_selected = idx;
-            } else if let Some(g_idx) = expanded_group_idx(state)
+            } else if !state.expand_all_groups
+                && let Some(g_idx) = expanded_group_idx(state)
                 && let Some(prev) = next_nonempty_group(state, g_idx, false)
             {
                 switch_to_group(state, prev, false);
@@ -155,7 +156,8 @@ fn handle_dashboard_tiles_key(state: &mut AppState, code: KeyCode) -> bool {
                 .map(|(i, _)| i)
             {
                 state.tile_selected = idx;
-            } else if let Some(g_idx) = expanded_group_idx(state)
+            } else if !state.expand_all_groups
+                && let Some(g_idx) = expanded_group_idx(state)
                 && let Some(next) = next_nonempty_group(state, g_idx, true)
             {
                 switch_to_group(state, next, false);
@@ -165,7 +167,8 @@ fn handle_dashboard_tiles_key(state: &mut AppState, code: KeyCode) -> bool {
         KeyCode::Char('j') | KeyCode::Down => {
             if let Some(idx) = nearest_in_direction(state, cur_row, cur_col, true) {
                 state.tile_selected = idx;
-            } else if let Some(g_idx) = expanded_group_idx(state)
+            } else if !state.expand_all_groups
+                && let Some(g_idx) = expanded_group_idx(state)
                 && let Some(next) = next_nonempty_group(state, g_idx, true)
             {
                 // At bottom of current group → fold it, expand next group.
@@ -176,7 +179,8 @@ fn handle_dashboard_tiles_key(state: &mut AppState, code: KeyCode) -> bool {
         KeyCode::Char('k') | KeyCode::Up => {
             if let Some(idx) = nearest_in_direction(state, cur_row, cur_col, false) {
                 state.tile_selected = idx;
-            } else if let Some(g_idx) = expanded_group_idx(state)
+            } else if !state.expand_all_groups
+                && let Some(g_idx) = expanded_group_idx(state)
                 && let Some(prev) = next_nonempty_group(state, g_idx, false)
             {
                 // At top of current group → fold it, expand previous group,
@@ -189,7 +193,20 @@ fn handle_dashboard_tiles_key(state: &mut AppState, code: KeyCode) -> bool {
             if let Some(g_idx) = expanded_group_idx(state)
                 && let Some(next) = next_nonempty_group(state, g_idx, true)
             {
-                switch_to_group(state, next, false);
+                if state.expand_all_groups {
+                    // Jump selection to the first tile of the next group,
+                    // keeping every group expanded.
+                    if let Some(idx) = state
+                        .layout
+                        .tile_targets
+                        .iter()
+                        .position(|t| t.group_idx == next)
+                    {
+                        state.tile_selected = idx;
+                    }
+                } else {
+                    switch_to_group(state, next, false);
+                }
             }
             true
         }
@@ -197,7 +214,22 @@ fn handle_dashboard_tiles_key(state: &mut AppState, code: KeyCode) -> bool {
             if let Some(g_idx) = expanded_group_idx(state)
                 && let Some(prev) = next_nonempty_group(state, g_idx, false)
             {
-                switch_to_group(state, prev, false);
+                if state.expand_all_groups {
+                    // Jump selection to the last tile of the prev group.
+                    if let Some(idx) = state
+                        .layout
+                        .tile_targets
+                        .iter()
+                        .enumerate()
+                        .rev()
+                        .find(|(_, t)| t.group_idx == prev)
+                        .map(|(i, _)| i)
+                    {
+                        state.tile_selected = idx;
+                    }
+                } else {
+                    switch_to_group(state, prev, false);
+                }
             }
             true
         }
@@ -264,15 +296,28 @@ fn nearest_in_direction(
 /// none is open, re-open the group containing the selected tile (or the
 /// first non-empty group).
 fn toggle_fold_all(state: &mut AppState) {
-    if state.expanded_group.is_some() {
-        state.expanded_group = None;
-    } else {
-        // Fall back to the first non-empty group.
-        state.expanded_group = state
-            .repo_groups
-            .iter()
-            .find(|g| !g.panes.is_empty())
-            .map(|g| g.key.clone());
+    // 3-state cycle: single open → all collapsed → all expanded → single open.
+    match (state.expanded_group.is_some(), state.expand_all_groups) {
+        (true, _) => {
+            // Single → all collapsed.
+            state.expanded_group = None;
+            state.expand_all_groups = false;
+        }
+        (false, false) => {
+            // All collapsed → all expanded.
+            state.expand_all_groups = true;
+            state.tile_selected = 0;
+        }
+        (false, true) => {
+            // All expanded → single (first non-empty group).
+            state.expand_all_groups = false;
+            state.expanded_group = state
+                .repo_groups
+                .iter()
+                .find(|g| !g.panes.is_empty())
+                .map(|g| g.key.clone());
+            state.tile_selected = 0;
+        }
     }
 }
 
@@ -314,10 +359,19 @@ pub fn init_expanded_group(state: &mut AppState) {
     }
 }
 
-/// Returns the index in `state.repo_groups` of the currently expanded
-/// group, if any. Match is by `key` (not display name), since two
-/// groups can share a name (e.g. multiple bare-repo worktrees).
+/// Returns the index in `state.repo_groups` of the group `u`/`d` should
+/// navigate away from. In single-group mode that's the expanded group;
+/// in `expand_all_groups` mode it's whichever group owns the currently
+/// selected tile. Match is by `key`, not display name, since two
+/// groups can share a name (multiple bare-repo worktrees).
 fn expanded_group_idx(state: &AppState) -> Option<usize> {
+    if state.expand_all_groups {
+        return state
+            .layout
+            .tile_targets
+            .get(state.tile_selected)
+            .map(|t| t.group_idx);
+    }
     state
         .expanded_group
         .as_ref()
@@ -337,6 +391,7 @@ fn switch_to_group(state: &mut AppState, g_idx: usize, to_last: bool) {
         return;
     }
     state.expanded_group = Some(group.key.clone());
+    state.expand_all_groups = false;
     state.tile_selected = if to_last { group.panes.len() - 1 } else { 0 };
     // Reset scroll so the new group is visible at the top.
     state.tile_scroll_group = g_idx;

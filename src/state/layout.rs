@@ -29,6 +29,9 @@ pub struct FrameLayout {
 pub struct TileTarget {
     pub rect: Rect,
     pub pane_id: String,
+    /// Index of the owning group in `state.repo_groups`. Lets `u`/`d`
+    /// figure out which group a tile belongs to in `expand_all` mode.
+    pub group_idx: usize,
     /// Grid row across all groups (per-group row offsets continue
     /// monotonically). Used for `j`/`k` row navigation.
     pub row: usize,

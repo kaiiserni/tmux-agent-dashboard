@@ -45,6 +45,10 @@ pub struct AppState {
     /// `None` = every group is folded (manual collapse-all). On first
     /// render with `None`, the first non-empty group is auto-expanded.
     pub expanded_group: Option<String>,
+    /// When `true`, every non-empty group renders expanded simultaneously.
+    /// Reached by cycling `f`: single → all-folded → all-expanded → single.
+    /// Overrides `expanded_group`; navigation works across all tiles.
+    pub expand_all_groups: bool,
     /// Currently-selected row in the Summary view (index into `summary_targets`).
     pub summary_selected: usize,
     pub summary_scroll_attention: usize,
@@ -80,6 +84,7 @@ impl AppState {
             tile_selected: 0,
             tile_scroll_group: 0,
             expanded_group: None,
+            expand_all_groups: false,
             summary_selected: 0,
             summary_scroll_attention: 0,
             summary_scroll_waiting: 0,
