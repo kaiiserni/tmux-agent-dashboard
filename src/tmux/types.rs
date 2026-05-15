@@ -26,6 +26,9 @@ pub struct PaneInfo {
     pub worktree: WorktreeMetadata,
     pub session_id: Option<String>,
     pub session_name: String,
+    /// Recorded `run_in_background` command (sticky per session). Used to
+    /// probe whether a `Background` pane's shell is actually still alive.
+    pub bg_cmd: String,
 }
 
 #[derive(Debug, Clone, Default)]

@@ -87,6 +87,28 @@ fn handle_event(pane: &str, event: AgentEvent) -> i32 {
             &wait_reason,
             meta_only,
         ),
+        AgentEvent::PlanReview {
+            agent,
+            cwd,
+            permission_mode,
+            worktree,
+            session_id,
+            ..
+        } => handlers::on_plan_review(
+            pane,
+            &context::make_ctx(&agent, &cwd, &permission_mode, &worktree, &session_id),
+        ),
+        AgentEvent::PermissionRequest {
+            agent,
+            cwd,
+            permission_mode,
+            worktree,
+            session_id,
+            ..
+        } => handlers::on_permission_request(
+            pane,
+            &context::make_ctx(&agent, &cwd, &permission_mode, &worktree, &session_id),
+        ),
         AgentEvent::Stop {
             agent,
             cwd,

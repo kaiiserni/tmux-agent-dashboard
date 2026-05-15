@@ -49,6 +49,29 @@ pub enum AgentEvent {
         agent_id: Option<String>,
         session_id: Option<String>,
     },
+    /// PreToolUse on `ExitPlanMode`: Claude finished planning and is
+    /// blocking on the plan-approval dialog. Claude Code emits no
+    /// Notification here, so this is the only signal the dashboard gets.
+    PlanReview {
+        agent: String,
+        cwd: String,
+        permission_mode: String,
+        worktree: Option<WorktreeInfo>,
+        agent_id: Option<String>,
+        session_id: Option<String>,
+    },
+    /// `PermissionRequest`: Claude is blocking on a tool-approval prompt
+    /// ("Do you want to proceed?"). Claude Code does not reliably emit a
+    /// state-changing Notification here, so without this the pane stays
+    /// stuck on its last status (usually `running`).
+    PermissionRequest {
+        agent: String,
+        cwd: String,
+        permission_mode: String,
+        worktree: Option<WorktreeInfo>,
+        agent_id: Option<String>,
+        session_id: Option<String>,
+    },
     Stop {
         agent: String,
         cwd: String,
@@ -123,6 +146,8 @@ impl AgentEvent {
             Self::SessionEnd { .. } => AgentEventKind::SessionEnd,
             Self::UserPromptSubmit { .. } => AgentEventKind::UserPromptSubmit,
             Self::Notification { .. } => AgentEventKind::Notification,
+            Self::PlanReview { .. } => AgentEventKind::PlanReview,
+            Self::PermissionRequest { .. } => AgentEventKind::PermissionRequest,
             Self::Stop { .. } => AgentEventKind::Stop,
             Self::StopFailure { .. } => AgentEventKind::StopFailure,
             Self::SubagentStart { .. } => AgentEventKind::SubagentStart,

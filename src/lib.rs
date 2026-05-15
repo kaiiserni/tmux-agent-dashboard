@@ -1,6 +1,7 @@
 pub mod activity;
 pub mod adapter;
 pub mod app;
+pub mod bg;
 pub mod cli;
 pub mod event;
 pub mod group;

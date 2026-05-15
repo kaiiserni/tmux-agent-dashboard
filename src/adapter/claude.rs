@@ -64,6 +64,16 @@ impl ClaudeAdapter {
             kind: AgentEventKind::Notification,
         },
         HookRegistration {
+            trigger: "PreToolUse",
+            matcher: Some("ExitPlanMode"),
+            kind: AgentEventKind::PlanReview,
+        },
+        HookRegistration {
+            trigger: "PermissionRequest",
+            matcher: None,
+            kind: AgentEventKind::PermissionRequest,
+        },
+        HookRegistration {
             trigger: "Stop",
             matcher: None,
             kind: AgentEventKind::Stop,
@@ -164,6 +174,22 @@ impl EventAdapter for ClaudeAdapter {
                     session_id: optional_str(input, "session_id"),
                 })
             }
+            "plan-review" => Some(AgentEvent::PlanReview {
+                agent: CLAUDE_AGENT.into(),
+                cwd: json_str(input, "cwd").into(),
+                permission_mode: json_str(input, "permission_mode").into(),
+                worktree: parse_worktree(input),
+                agent_id: optional_str(input, "agent_id"),
+                session_id: optional_str(input, "session_id"),
+            }),
+            "permission-request" => Some(AgentEvent::PermissionRequest {
+                agent: CLAUDE_AGENT.into(),
+                cwd: json_str(input, "cwd").into(),
+                permission_mode: json_str(input, "permission_mode").into(),
+                worktree: parse_worktree(input),
+                agent_id: optional_str(input, "agent_id"),
+                session_id: optional_str(input, "session_id"),
+            }),
             "stop" => Some(AgentEvent::Stop {
                 agent: CLAUDE_AGENT.into(),
                 cwd: json_str(input, "cwd").into(),

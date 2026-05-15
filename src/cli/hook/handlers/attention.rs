@@ -1,7 +1,7 @@
 use crate::cli::{set_attention, set_status};
 use crate::tmux;
 
-use super::super::context::{AgentContext, set_agent_meta};
+use super::super::context::{AgentContext, pane_writes_allowed, set_agent_meta};
 use super::status_priority::resolve_notification_status;
 
 pub(in crate::cli::hook) fn on_notification(
@@ -25,6 +25,30 @@ pub(in crate::cli::hook) fn on_notification(
     } else {
         tmux::set_pane_option(pane, tmux::PANE_WAIT_REASON, wait_reason);
     }
+    0
+}
+
+pub(in crate::cli::hook) fn on_plan_review(pane: &str, ctx: &AgentContext<'_>) -> i32 {
+    set_agent_meta(pane, ctx);
+    // A subagent shares the parent's $TMUX_PANE; its ExitPlanMode must
+    // not hijack the parent badge.
+    if !pane_writes_allowed(pane) {
+        return 0;
+    }
+    set_status(pane, "waiting");
+    set_attention(pane, "notification");
+    tmux::set_pane_option(pane, tmux::PANE_WAIT_REASON, "plan_review");
+    0
+}
+
+pub(in crate::cli::hook) fn on_permission_request(pane: &str, ctx: &AgentContext<'_>) -> i32 {
+    set_agent_meta(pane, ctx);
+    set_status(pane, "waiting");
+    set_attention(pane, "notification");
+    // `permission` is recognized by `is_permission_wait_reason`, so the
+    // pane stays `waiting` even if a background shell is live — the user
+    // still has to act on the prompt.
+    tmux::set_pane_option(pane, tmux::PANE_WAIT_REASON, "permission");
     0
 }
 

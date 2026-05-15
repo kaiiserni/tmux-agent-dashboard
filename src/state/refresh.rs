@@ -14,10 +14,34 @@ impl AppState {
     pub fn refresh(&mut self) {
         let sessions = tmux::query_sessions();
         self.repo_groups = group_panes_with_cache(&sessions, &mut self.git_cache);
+        self.reconcile_stale_background();
         self.refresh_session_names();
         self.apply_session_names();
         crate::pending::sweep_stale_marks(&mut self.repo_groups);
         self.sort_groups_if_needed();
+    }
+
+    /// Self-heal panes left on `background` after their `run_in_background`
+    /// shell already exited. `@pane_bg_cmd` is sticky per session and a
+    /// pane that Stopped while it was set never gets re-evaluated, so the
+    /// pane would otherwise show `background` forever. Probes liveness and
+    /// rewrites the tmux state once so every consumer (counts, status
+    /// line, `next`) agrees.
+    fn reconcile_stale_background(&mut self) {
+        for group in &mut self.repo_groups {
+            for (pane, _) in &mut group.panes {
+                if pane.status != PaneStatus::Background || pane.bg_cmd.is_empty() {
+                    continue;
+                }
+                if crate::bg::bg_shell_alive(&pane.bg_cmd) {
+                    continue;
+                }
+                tmux::unset_pane_option(&pane.pane_id, tmux::PANE_BG_CMD);
+                tmux::set_pane_option(&pane.pane_id, tmux::PANE_STATUS, "idle");
+                pane.status = PaneStatus::Idle;
+                pane.bg_cmd.clear();
+            }
+        }
     }
 
     /// Refresh the cached Claude session-name map, but only when stale.

@@ -180,7 +180,6 @@ fn parse_pane_fields(parts: &[String]) -> Option<PaneInfo> {
     // Subagents column is also read so the format string indices line up
     // with the sidebar — we just don't expose it on the dashboard.
     let _subagents = &parts[pane_line_field::SUBAGENTS];
-    let _bg_cmd = &parts[pane_line_field::BG_CMD];
     let _prompt_source = &parts[pane_line_field::PROMPT_SOURCE];
 
     Some(PaneInfo {
@@ -203,6 +202,7 @@ fn parse_pane_fields(parts: &[String]) -> Option<PaneInfo> {
         },
         session_id,
         session_name: String::new(),
+        bg_cmd: parts[pane_line_field::BG_CMD].to_string(),
     })
 }
 

@@ -38,10 +38,18 @@ pub(in crate::cli::hook) fn on_stop(
         tmux::set_pane_option(pane, tmux::PANE_PROMPT, &msg);
         tmux::set_pane_option(pane, tmux::PANE_PROMPT_SOURCE, "response");
     }
-    let bg_shell_live = !tmux::get_pane_option_value(pane, tmux::PANE_BG_CMD).is_empty();
+    // `@pane_bg_cmd` is sticky for the whole session, so a non-empty
+    // value alone does not mean a shell is still running — probe it.
+    let bg_cmd = tmux::get_pane_option_value(pane, tmux::PANE_BG_CMD);
+    let bg_shell_live = !bg_cmd.is_empty() && crate::bg::bg_shell_alive(&bg_cmd);
     if bg_shell_live {
         tmux::unset_pane_option(pane, tmux::PANE_WAIT_REASON);
     } else {
+        // Drop the stale flag so later refreshes / Stops don't keep
+        // mis-classifying the pane as background.
+        if !bg_cmd.is_empty() {
+            tmux::unset_pane_option(pane, tmux::PANE_BG_CMD);
+        }
         clear_run_state(pane);
     }
     mark_task_reset(pane);
