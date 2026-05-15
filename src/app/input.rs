@@ -68,6 +68,14 @@ pub(super) fn handle_event(
                     }
                 }
             },
+            // Right-click anywhere closes the dashboard — mirrors the
+            // tmux right-click that opened it, so it acts as a toggle.
+            // (tmux popups are mouse-modal, so the status-bar bind can't
+            // fire while open; the close has to happen in-app.)
+            MouseEventKind::Down(MouseButton::Right) => {
+                state.should_exit = true;
+                return true;
+            }
             MouseEventKind::ScrollDown if state.dashboard_tab == DashboardTab::Tiles => {
                 // One-group-expanded model: scroll = open next group.
                 if let Some(g_idx) = expanded_group_idx(state)

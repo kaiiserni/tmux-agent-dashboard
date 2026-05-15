@@ -58,6 +58,9 @@ fn main() -> io::Result<()> {
         Some("next") => {
             return cmd_next();
         }
+        Some("goto") => {
+            return cmd_goto(&args[1..]);
+        }
         Some("back") => {
             return cmd_back();
         }
@@ -176,7 +179,14 @@ fn cmd_status_line() -> io::Result<()> {
         if shown > 0 {
             out.push_str(SEP);
         }
+        // Wrap the clickable chunk in a tmux mouse range keyed on the
+        // pane id; the separator stays outside so gaps aren't clickable.
+        // `visible_width` strips `#[...]` so the width math is unaffected.
+        out.push_str("#[range=user|");
+        out.push_str(&entry.pane_id);
+        out.push(']');
         out.push_str(&chunk);
+        out.push_str("#[norange]");
         visible_len += add;
         shown += 1;
     }
@@ -185,7 +195,7 @@ fn cmd_status_line() -> io::Result<()> {
         let _ = std::fmt::Write::write_fmt(
             &mut out,
             format_args!(
-                "  #[fg=colour240]│#[fg=yellow,bold]  +{} more#[default]",
+                "  #[fg=colour240]│#[range=user|+more]#[fg=yellow,bold]  +{} more#[norange]#[default]",
                 total - shown
             ),
         );
@@ -288,6 +298,42 @@ fn cmd_next() -> io::Result<()> {
     Ok(())
 }
 
+/// `goto <pane_id>` — jump straight to a specific pane. Bound to a tmux
+/// `MouseDown1Status` range so clicking a status-line item activates its
+/// agent. Mirrors `cmd_next`'s jump-recording so `back` still works.
+/// `%` followed by at least one digit — tmux's pane-id shape.
+fn is_pane_id(s: &str) -> bool {
+    s.len() >= 2 && s.starts_with('%') && s[1..].chars().all(|c| c.is_ascii_digit())
+}
+
+fn cmd_goto(args: &[String]) -> io::Result<()> {
+    let target = match args.first() {
+        Some(p) => p.trim(),
+        None => return Ok(()),
+    };
+    // Range value is attacker-free (we emit it ourselves) but guard the
+    // pane-id shape anyway; ignore anything else (e.g. a stale id).
+    if !is_pane_id(target) {
+        return Ok(());
+    }
+
+    let from = tmux::run_tmux(&["display-message", "-p", "#{pane_id}"])
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    if !from.is_empty() && from != target {
+        let _ = tmux::run_tmux(&["set", "-g", JUMP_FROM, &from]);
+        let _ = tmux::run_tmux(&["set", "-g", JUMP_TO, target]);
+    }
+
+    tmux::select_pane(target);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    tmux::set_pane_option(target, tmux::PANE_LAST_SEEN_AT, &now.to_string());
+    Ok(())
+}
+
 /// Undo the most recent `next` jump: switch back to the pane we came
 /// from. Marking is no longer part of this — use `mark` for that.
 fn cmd_back() -> io::Result<()> {
@@ -326,4 +372,20 @@ fn cmd_mark() -> io::Result<()> {
         let _ = tmux::run_tmux(&["display-message", "Unmarked"]);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_pane_id;
+
+    #[test]
+    fn pane_id_shape() {
+        assert!(is_pane_id("%0"));
+        assert!(is_pane_id("%208"));
+        assert!(!is_pane_id("%"));
+        assert!(!is_pane_id("208"));
+        assert!(!is_pane_id("%2a8"));
+        assert!(!is_pane_id("+more"));
+        assert!(!is_pane_id(""));
+    }
 }
