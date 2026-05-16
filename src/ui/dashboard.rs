@@ -695,11 +695,12 @@ fn draw_idle(frame: &mut Frame, state: &mut AppState, area: Rect) {
         })
         .map(|(group_name, p, info)| {
             let branch = resolve_branch(p, info);
-            let mtime = crate::activity::log_mtime(&p.pane_id).unwrap_or(std::time::UNIX_EPOCH);
+            let mtime_opt = crate::activity::log_mtime(&p.pane_id);
+            let mtime = mtime_opt.unwrap_or(std::time::UNIX_EPOCH);
             // Prefer the last assistant message / user prompt (same source
             // Running and Responded use). Fall back to the latest activity
             // log entry, then to a static "idle" label.
-            let reason = if !p.prompt.is_empty() {
+            let base = if !p.prompt.is_empty() {
                 p.prompt.clone()
             } else if let Some(e) = crate::activity::read_activity_log(&p.pane_id, 1)
                 .into_iter()
@@ -712,6 +713,13 @@ fn draw_idle(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 }
             } else {
                 "idle".into()
+            };
+            // Prefix the shortest-possible "last touch" age (log mtime is
+            // bumped on every tool use and at every Stop).
+            let reason = match mtime_opt.and_then(crate::time::compact_ago) {
+                Some(age) if base == "idle" => format!("{age} ago"),
+                Some(age) => format!("{age} ago · {base}"),
+                None => base,
             };
             let row = SummaryRow {
                 status_icon: state.icons.status_icon(&p.status).to_string(),
