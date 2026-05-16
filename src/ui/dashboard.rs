@@ -277,7 +277,8 @@ fn draw_attention(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 status_color: state.theme.badge_danger,
                 agent_glyph: p.agent.glyph(),
                 agent_color: agent_color(state, &p.agent),
-                title: format!("{group_name}  {branch}"),
+                repo: group_name.clone(),
+                branch: branch.clone(),
                 reason: if !p.wait_reason.is_empty() {
                     p.wait_reason.clone()
                 } else {
@@ -321,7 +322,8 @@ fn draw_waiting(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 },
                 agent_glyph: p.agent.glyph(),
                 agent_color: agent_color(state, &p.agent),
-                title: format!("{group_name}  {branch}"),
+                repo: group_name.clone(),
+                branch: branch.clone(),
                 reason: if !p.wait_reason.is_empty() {
                     p.wait_reason.clone()
                 } else if matches!(p.status, PaneStatus::Error) {
@@ -363,7 +365,8 @@ fn draw_running(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 status_color: state.theme.status_running,
                 agent_glyph: p.agent.glyph(),
                 agent_color: agent_color(state, &p.agent),
-                title: format!("{group_name}  {branch}"),
+                repo: group_name.clone(),
+                branch: branch.clone(),
                 reason: if !p.prompt.is_empty() {
                     p.prompt.clone()
                 } else if !p.current_command.is_empty() {
@@ -420,7 +423,8 @@ struct SummaryRow {
     status_color: ratatui::style::Color,
     agent_glyph: &'static str,
     agent_color: ratatui::style::Color,
-    title: String,
+    repo: String,
+    branch: String,
     reason: String,
     /// Compact "last touch" age (e.g. `2d`), rendered dim after the
     /// reason. `None` = no age column for this row.
@@ -476,19 +480,28 @@ fn render_list_with_targets(
             });
 
         let prefix = if selected { "▌ " } else { "  " };
-        // Reserve a fixed slice of the row for the title so a long reason
-        // can never visually erase the identity column.
+        // Fixed identity columns so repo / branch line up vertically and
+        // a long reason can never erase them. 1-cell gap between them.
         const FIXED_OVERHEAD: usize = 2 /* prefix */ + 2 /* icon + space */ + 2 /* glyph + space */;
-        const TITLE_MAX: usize = 28;
+        const REPO_W: usize = 16;
+        const BRANCH_W: usize = 12;
+        const IDENT_W: usize = REPO_W + 1 + BRANCH_W;
         let available = width.saturating_sub(FIXED_OVERHEAD);
-        let title_w = available.min(TITLE_MAX);
-        // Reserve a trailing slice for the dim age column so it is never
-        // pushed off-row by a long reason.
-        let age_w = row.age.as_deref().map(|a| a.chars().count() + 1).unwrap_or(0);
-        let reason_w = available.saturating_sub(title_w + 3 + age_w); // "  (" + age
-        let title_trim = truncate_to_width(&row.title, title_w);
-        let reason_trim = truncate_to_width(&row.reason, reason_w);
-        let title_padded = format!("{title_trim:<title_w$}");
+        // Fixed right-aligned age column so staleness lines up across
+        // every section. Width = widest compact age ("11mo") + 1 sep.
+        const AGE_SLOT: usize = 5;
+        let age_field = match row.age.as_deref() {
+            Some(a) => format!("{:>AGE_SLOT$}", truncate_to_width(a, AGE_SLOT - 1)),
+            None => " ".repeat(AGE_SLOT),
+        };
+        // Reason sits between the identity columns and the fixed age
+        // column; "  (" + ")" = 4 cells of chrome around it. Padding
+        // after the reason keeps the age flush to the right edge.
+        let reason_area = available.saturating_sub(IDENT_W + 4 + AGE_SLOT);
+        let repo_cell = format!("{:<REPO_W$}", truncate_to_width(&row.repo, REPO_W));
+        let branch_cell = format!("{:<BRANCH_W$}", truncate_to_width(&row.branch, BRANCH_W));
+        let reason_trim = truncate_to_width(&row.reason, reason_area);
+        let reason_pad = reason_area.saturating_sub(super::text::display_width(&reason_trim));
         let title_style = Style::default()
             .fg(state.theme.text_active)
             .add_modifier(if selected {
@@ -501,7 +514,7 @@ fn render_list_with_targets(
         } else {
             state.theme.border_inactive
         });
-        let mut spans = vec![
+        let line = Line::from(vec![
             Span::styled(prefix.to_string(), prefix_style),
             Span::styled(
                 format!("{} ", row.status_icon),
@@ -511,19 +524,17 @@ fn render_list_with_targets(
                 format!("{} ", row.agent_glyph),
                 Style::default().fg(row.agent_color),
             ),
-            Span::styled(title_padded, title_style),
+            Span::styled(repo_cell, title_style),
+            Span::raw(" "),
+            Span::styled(branch_cell, title_style),
             Span::styled(
                 format!("  ({reason_trim})"),
                 Style::default().fg(state.theme.wait_reason),
             ),
-        ];
-        if let Some(age) = &row.age {
-            spans.push(Span::styled(
-                format!(" {age}"),
-                Style::default().fg(state.theme.text_muted),
-            ));
-        }
-        frame.render_widget(Paragraph::new(Line::from(spans)), row_rect);
+            Span::raw(" ".repeat(reason_pad)),
+            Span::styled(age_field, Style::default().fg(state.theme.text_muted)),
+        ]);
+        frame.render_widget(Paragraph::new(line), row_rect);
     }
 }
 
@@ -629,7 +640,8 @@ fn draw_responded(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 status_color: state.theme.badge_auto,
                 agent_glyph: p.agent.glyph(),
                 agent_color: agent_color(state, &p.agent),
-                title: format!("{group_name}  {branch}"),
+                repo: group_name.clone(),
+                branch: branch.clone(),
                 reason,
                 age: pane_age(p),
                 pane_id: p.pane_id.clone(),
@@ -683,7 +695,8 @@ fn draw_marked_unread(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 status_color: state.theme.badge_plan,
                 agent_glyph: p.agent.glyph(),
                 agent_color: agent_color(state, &p.agent),
-                title: format!("{group_name}  {branch}"),
+                repo: group_name.clone(),
+                branch: branch.clone(),
                 reason,
                 // Pinned parking lot — keep it clean, no age column.
                 age: None,
@@ -748,7 +761,8 @@ fn draw_idle(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 status_color: state.theme.status_idle,
                 agent_glyph: p.agent.glyph(),
                 agent_color: agent_color(state, &p.agent),
-                title: format!("{group_name}  {branch}"),
+                repo: group_name.clone(),
+                branch: branch.clone(),
                 reason,
                 age: pane_age(p),
                 pane_id: p.pane_id.clone(),
