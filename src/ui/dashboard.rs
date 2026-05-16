@@ -283,6 +283,7 @@ fn draw_attention(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 } else {
                     "notification".into()
                 },
+                age: pane_age(p),
                 pane_id: p.pane_id.clone(),
             }
         })
@@ -328,6 +329,7 @@ fn draw_waiting(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 } else {
                     "waiting".into()
                 },
+                age: pane_age(p),
                 pane_id: p.pane_id.clone(),
             }
         })
@@ -371,6 +373,13 @@ fn draw_running(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 } else {
                     "running".into()
                 },
+                // Background panes don't write activity-log entries, so
+                // their age would look stale even when healthy — omit it.
+                age: if matches!(p.status, PaneStatus::Background) {
+                    None
+                } else {
+                    pane_age(p)
+                },
                 pane_id: p.pane_id.clone(),
             }
         })
@@ -413,7 +422,16 @@ struct SummaryRow {
     agent_color: ratatui::style::Color,
     title: String,
     reason: String,
+    /// Compact "last touch" age (e.g. `2d`), rendered dim after the
+    /// reason. `None` = no age column for this row.
+    age: Option<String>,
     pane_id: String,
+}
+
+/// Shortest-possible age since the pane's activity log was last bumped
+/// (every tool use + every Stop). Drives the staleness column.
+fn pane_age(p: &crate::tmux::PaneInfo) -> Option<String> {
+    crate::activity::log_mtime(&p.pane_id).and_then(crate::time::compact_ago)
 }
 
 /// Render a vertical list (status icon · agent glyph · title · reason) and
@@ -464,7 +482,10 @@ fn render_list_with_targets(
         const TITLE_MAX: usize = 28;
         let available = width.saturating_sub(FIXED_OVERHEAD);
         let title_w = available.min(TITLE_MAX);
-        let reason_w = available.saturating_sub(title_w + 3); // "  (" prefix
+        // Reserve a trailing slice for the dim age column so it is never
+        // pushed off-row by a long reason.
+        let age_w = row.age.as_deref().map(|a| a.chars().count() + 1).unwrap_or(0);
+        let reason_w = available.saturating_sub(title_w + 3 + age_w); // "  (" + age
         let title_trim = truncate_to_width(&row.title, title_w);
         let reason_trim = truncate_to_width(&row.reason, reason_w);
         let title_padded = format!("{title_trim:<title_w$}");
@@ -480,7 +501,7 @@ fn render_list_with_targets(
         } else {
             state.theme.border_inactive
         });
-        let line = Line::from(vec![
+        let mut spans = vec![
             Span::styled(prefix.to_string(), prefix_style),
             Span::styled(
                 format!("{} ", row.status_icon),
@@ -495,8 +516,14 @@ fn render_list_with_targets(
                 format!("  ({reason_trim})"),
                 Style::default().fg(state.theme.wait_reason),
             ),
-        ]);
-        frame.render_widget(Paragraph::new(line), row_rect);
+        ];
+        if let Some(age) = &row.age {
+            spans.push(Span::styled(
+                format!(" {age}"),
+                Style::default().fg(state.theme.text_muted),
+            ));
+        }
+        frame.render_widget(Paragraph::new(Line::from(spans)), row_rect);
     }
 }
 
@@ -604,6 +631,7 @@ fn draw_responded(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 agent_color: agent_color(state, &p.agent),
                 title: format!("{group_name}  {branch}"),
                 reason,
+                age: pane_age(p),
                 pane_id: p.pane_id.clone(),
             };
             (row, mtime)
@@ -657,6 +685,8 @@ fn draw_marked_unread(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 agent_color: agent_color(state, &p.agent),
                 title: format!("{group_name}  {branch}"),
                 reason,
+                // Pinned parking lot — keep it clean, no age column.
+                age: None,
                 pane_id: p.pane_id.clone(),
             };
             (row, marked_at)
@@ -695,12 +725,11 @@ fn draw_idle(frame: &mut Frame, state: &mut AppState, area: Rect) {
         })
         .map(|(group_name, p, info)| {
             let branch = resolve_branch(p, info);
-            let mtime_opt = crate::activity::log_mtime(&p.pane_id);
-            let mtime = mtime_opt.unwrap_or(std::time::UNIX_EPOCH);
+            let mtime = crate::activity::log_mtime(&p.pane_id).unwrap_or(std::time::UNIX_EPOCH);
             // Prefer the last assistant message / user prompt (same source
             // Running and Responded use). Fall back to the latest activity
             // log entry, then to a static "idle" label.
-            let base = if !p.prompt.is_empty() {
+            let reason = if !p.prompt.is_empty() {
                 p.prompt.clone()
             } else if let Some(e) = crate::activity::read_activity_log(&p.pane_id, 1)
                 .into_iter()
@@ -714,13 +743,6 @@ fn draw_idle(frame: &mut Frame, state: &mut AppState, area: Rect) {
             } else {
                 "idle".into()
             };
-            // Prefix the shortest-possible "last touch" age (log mtime is
-            // bumped on every tool use and at every Stop).
-            let reason = match mtime_opt.and_then(crate::time::compact_ago) {
-                Some(age) if base == "idle" => format!("{age} ago"),
-                Some(age) => format!("{age} ago · {base}"),
-                None => base,
-            };
             let row = SummaryRow {
                 status_icon: state.icons.status_icon(&p.status).to_string(),
                 status_color: state.theme.status_idle,
@@ -728,6 +750,7 @@ fn draw_idle(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 agent_color: agent_color(state, &p.agent),
                 title: format!("{group_name}  {branch}"),
                 reason,
+                age: pane_age(p),
                 pane_id: p.pane_id.clone(),
             };
             (row, mtime)
