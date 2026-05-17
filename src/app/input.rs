@@ -247,6 +247,12 @@ fn handle_dashboard_tiles_key(state: &mut AppState, code: KeyCode) -> bool {
             }
             true
         }
+        KeyCode::Char('c') => {
+            if let Some(target) = state.layout.tile_targets.get(cur).cloned() {
+                clear_pane_pending(state, &target.pane_id);
+            }
+            true
+        }
         KeyCode::Char('f') => {
             toggle_fold_all(state);
             true
@@ -547,6 +553,12 @@ fn handle_dashboard_summary_key(state: &mut AppState, code: KeyCode) -> bool {
             }
             true
         }
+        KeyCode::Char('c') => {
+            if let Some(target) = state.layout.summary_targets.get(cur).cloned() {
+                clear_pane_pending(state, &target.pane_id);
+            }
+            true
+        }
         KeyCode::Enter => {
             if let Some(target) = state.layout.summary_targets.get(cur).cloned() {
                 state.activate_pane_by_id(&target.pane_id);
@@ -586,6 +598,38 @@ fn toggle_mark(state: &mut AppState, pane_id: &str) {
     if let Some(v) = new_value {
         tmux::set_pane_option(pane_id, tmux::PANE_MARKED_UNREAD_AT, &v.to_string());
     }
+}
+
+/// `c`: force-clear a pane's pending state. Escape hatch for when a
+/// hook fails to clear `@pane_attention`/`@pane_status` on visit and the
+/// agent stays stuck in the status line. Wipes attention, status,
+/// wait_reason and the unread mark, and stamps `@pane_last_seen_at` to
+/// now so the Responded (unseen) heuristic also stops flagging it.
+/// Mutates the in-memory pane so it drops out of the next render
+/// immediately, and writes through to tmux so other invocations agree.
+fn clear_pane_pending(state: &mut AppState, pane_id: &str) {
+    use crate::tmux;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    for group in state.repo_groups.iter_mut() {
+        for (pane, _) in group.panes.iter_mut() {
+            if pane.pane_id == pane_id {
+                pane.attention = false;
+                pane.status = crate::tmux::PaneStatus::Idle;
+                pane.wait_reason.clear();
+                pane.marked_unread_at = None;
+                pane.last_seen_at = Some(now);
+                break;
+            }
+        }
+    }
+    tmux::unset_pane_option(pane_id, tmux::PANE_ATTENTION);
+    tmux::unset_pane_option(pane_id, tmux::PANE_STATUS);
+    tmux::unset_pane_option(pane_id, tmux::PANE_WAIT_REASON);
+    tmux::unset_pane_option(pane_id, tmux::PANE_MARKED_UNREAD_AT);
+    tmux::set_pane_option(pane_id, tmux::PANE_LAST_SEEN_AT, &now.to_string());
 }
 
 fn is_left_column(section: SummarySection) -> bool {

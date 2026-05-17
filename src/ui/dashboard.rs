@@ -31,7 +31,7 @@ pub fn draw_dashboard(frame: &mut Frame, state: &mut AppState) {
     let outer = Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(
-            format!(" Agents Dashboard ·{tab_label}· Tab: switch · q: close "),
+            format!(" Agents Dashboard ·{tab_label}· Tab: switch · c: clear · q: close "),
             Style::default()
                 .fg(state.theme.accent)
                 .add_modifier(Modifier::BOLD),
