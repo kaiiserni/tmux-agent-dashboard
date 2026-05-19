@@ -43,7 +43,7 @@ pub fn draw_dashboard(frame: &mut Frame, state: &mut AppState) {
         ""
     };
     let tab_hint = match state.dashboard_tab {
-        DashboardTab::Tiles => "f/z: fold · ",
+        DashboardTab::Tiles => "f/z: fold · a: active-only · ",
         DashboardTab::Summary => "",
     };
     let outer = Block::default()
@@ -237,6 +237,33 @@ fn count_attention(state: &AppState) -> usize {
 
 fn needs_attention(status: &PaneStatus, attention: bool) -> bool {
     attention || matches!(status, PaneStatus::Waiting | PaneStatus::Error)
+}
+
+/// Tiles "active-only" filter (toggled with `a`): a pane is hidden only
+/// when it is pure idle — no attention flag, not marked unread.
+fn tile_active(pane: &PaneInfo) -> bool {
+    !matches!(pane.status, PaneStatus::Idle)
+        || pane.attention
+        || pane.marked_unread_at.is_some()
+}
+
+/// Indices into `group.panes` that should be rendered in the Tiles view
+/// under the current filter setting.
+fn visible_pane_indices(
+    group: &crate::group::RepoGroup,
+    hide_idle: bool,
+) -> Vec<usize> {
+    if hide_idle {
+        group
+            .panes
+            .iter()
+            .enumerate()
+            .filter(|(_, (p, _))| tile_active(p))
+            .map(|(i, _)| i)
+            .collect()
+    } else {
+        (0..group.panes.len()).collect()
+    }
 }
 
 /// Priority key for ordering Summary-tab rows: attention-flagged first,
@@ -955,9 +982,19 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
     // to the first non-empty group.
     crate::app::input::ensure_expanded_group(state);
 
-    if state.repo_groups.is_empty() || state.repo_groups.iter().all(|g| g.panes.is_empty()) {
+    let hide_idle = state.tiles_hide_idle;
+    let any_visible = state
+        .repo_groups
+        .iter()
+        .any(|g| !visible_pane_indices(g, hide_idle).is_empty());
+    if !any_visible {
+        let msg = if hide_idle {
+            "  no active agents (press `a` to show idle)"
+        } else {
+            "  no agents to show"
+        };
         let para = Paragraph::new(Line::from(Span::styled(
-            "  no agents to show",
+            msg,
             Style::default().fg(state.theme.text_muted),
         )));
         frame.render_widget(para, area);
@@ -975,16 +1012,13 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let mut row_base: usize = 0;
     let mut total_tiles: usize = 0;
     for (idx, group) in state.repo_groups.iter().enumerate() {
-        if group.panes.is_empty() {
+        let visible = visible_pane_indices(group, hide_idle);
+        if visible.is_empty() {
             continue;
         }
         let folded = !state.expand_all_groups
             && state.expanded_group.as_deref() != Some(group.key.as_str());
-        let rows = if folded {
-            0
-        } else {
-            group.panes.len().div_ceil(cols)
-        };
+        let rows = if folded { 0 } else { visible.len().div_ceil(cols) };
         let body_h = if folded {
             0
         } else {
@@ -999,7 +1033,7 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
         virtual_y += GROUP_HEADER_H as i32 + body_h + GROUP_SPACER_H as i32;
         if !folded {
             row_base += rows;
-            total_tiles += group.panes.len();
+            total_tiles += visible.len();
         }
     }
     let content_h = virtual_y;
@@ -1020,7 +1054,8 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
             if b.folded {
                 continue;
             }
-            let panes = state.repo_groups[b.group_idx].panes.len();
+            let panes =
+                visible_pane_indices(&state.repo_groups[b.group_idx], hide_idle).len();
             if state.tile_selected < seen + panes {
                 let local = state.tile_selected - seen;
                 let r = (local / cols) as i32;
@@ -1055,11 +1090,15 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
         let header_y = vp_top + b.virtual_y - scroll;
         if header_y >= vp_top && header_y < vp_bottom {
             let group_name = state.repo_groups[group_idx].name.clone();
-            let count = state.repo_groups[group_idx].panes.len();
-            let attention = state.repo_groups[group_idx]
-                .panes
+            let visible_for_header =
+                visible_pane_indices(&state.repo_groups[group_idx], hide_idle);
+            let count = visible_for_header.len();
+            let attention = visible_for_header
                 .iter()
-                .filter(|(p, _)| needs_attention(&p.status, p.attention))
+                .filter(|&&i| {
+                    let (p, _) = &state.repo_groups[group_idx].panes[i];
+                    needs_attention(&p.status, p.attention)
+                })
                 .count();
             let hdr = Rect {
                 x: area.x,
@@ -1081,6 +1120,7 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
             b.row_base,
             b.virtual_y + GROUP_HEADER_H as i32,
             scroll,
+            hide_idle,
         );
     }
 }
@@ -1095,15 +1135,17 @@ fn draw_group_tiles(
     row_offset: usize,
     body_virtual_y: i32,
     scroll: i32,
+    hide_idle: bool,
 ) {
     let cols = col_constraints.len();
-    let panes_len = state.repo_groups[group_idx].panes.len();
+    let visible_idx = visible_pane_indices(&state.repo_groups[group_idx], hide_idle);
     let vp_top = area.y as i32;
     let vp_bottom = vp_top + area.height as i32;
 
-    for idx in 0..panes_len {
-        let row = idx / cols;
-        let col = idx % cols;
+    for (local, &orig_idx) in visible_idx.iter().enumerate() {
+        let idx = orig_idx;
+        let row = local / cols;
+        let col = local % cols;
         let tile_y = vp_top + body_virtual_y + row as i32 * TILE_STRIDE - scroll;
         let visible = tile_y >= vp_top && tile_y + TILE_H as i32 <= vp_bottom;
 

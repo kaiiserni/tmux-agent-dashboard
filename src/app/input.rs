@@ -126,6 +126,11 @@ fn handle_dashboard_tiles_key(state: &mut AppState, code: KeyCode) -> bool {
                 toggle_fold_all(state);
                 true
             }
+            KeyCode::Char('a') => {
+                state.tiles_hide_idle = !state.tiles_hide_idle;
+                state.tile_selected = 0;
+                true
+            }
             _ => false,
         };
     }
@@ -265,6 +270,11 @@ fn handle_dashboard_tiles_key(state: &mut AppState, code: KeyCode) -> bool {
             toggle_fold_current(state, cur);
             true
         }
+        KeyCode::Char('a') => {
+            state.tiles_hide_idle = !state.tiles_hide_idle;
+            state.tile_selected = 0;
+            true
+        }
         KeyCode::Enter => {
             if let Some(target) = state.layout.tile_targets.get(cur).cloned() {
                 state.activate_pane_by_id(&target.pane_id);
@@ -350,16 +360,28 @@ fn toggle_fold_current(state: &mut AppState, _cur: usize) {
 /// every group) is preserved. Initialization to the first group is
 /// done once in `setup::init_state`, not on every refresh.
 pub fn ensure_expanded_group(state: &mut AppState) {
+    let hide_idle = state.tiles_hide_idle;
+    let has_visible = |g: &crate::group::RepoGroup| {
+        if hide_idle {
+            g.panes.iter().any(|(p, _)| {
+                !matches!(p.status, crate::tmux::PaneStatus::Idle)
+                    || p.attention
+                    || p.marked_unread_at.is_some()
+            })
+        } else {
+            !g.panes.is_empty()
+        }
+    };
     if let Some(key) = state.expanded_group.clone() {
         let valid = state
             .repo_groups
             .iter()
-            .any(|g| g.key == key && !g.panes.is_empty());
+            .any(|g| g.key == key && has_visible(g));
         if !valid {
             state.expanded_group = state
                 .repo_groups
                 .iter()
-                .find(|g| !g.panes.is_empty())
+                .find(|g| has_visible(g))
                 .map(|g| g.key.clone());
         }
     }

@@ -49,6 +49,9 @@ pub struct AppState {
     /// Reached by cycling `f`: single → all-folded → all-expanded → single.
     /// Overrides `expanded_group`; navigation works across all tiles.
     pub expand_all_groups: bool,
+    /// Tiles view: when `true`, hide pure-idle panes (idle, no attention,
+    /// no marked-unread). Toggled with `a` in the Tiles tab.
+    pub tiles_hide_idle: bool,
     /// Currently-selected row in the Summary view (index into `summary_targets`).
     pub summary_selected: usize,
     pub summary_scroll_attention: usize,
@@ -89,6 +92,7 @@ impl AppState {
             tile_scroll_group: 0,
             expanded_group: None,
             expand_all_groups: true,
+            tiles_hide_idle: false,
             summary_selected: 0,
             summary_scroll_attention: 0,
             summary_scroll_waiting: 0,
