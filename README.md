@@ -45,6 +45,7 @@ run-shell '~/projects/tmux-agent-dashboard/tmux-agent-dashboard.tmux'
 | `prefix + ñ` | Open dashboard popup |
 | `Tab` | Switch between Summary and Tiles |
 | `s` | Toggle attention-first sort |
+| `p` | Toggle redact mode (hide ages/timestamps + mask text, for screenshots) |
 | `j` / `k` / `↓` / `↑` | Move row selection (auto-scrolls across lists) |
 | `h` / `l` / `←` / `→` | Jump between columns (Summary view) |
 | `g` / `G` | Jump to first / last row (Summary) |

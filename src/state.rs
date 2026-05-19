@@ -57,6 +57,10 @@ pub struct AppState {
     pub summary_scroll_running: usize,
     pub summary_scroll_marked_unread: usize,
     pub summary_scroll_idle: usize,
+    /// Screenshot/redact mode (`<`): hides age + activity-timestamp
+    /// columns and masks all free-text content (repo, branch, reason,
+    /// prompt, group headers, activity labels).
+    pub privacy_mode: bool,
     /// Set by `q` / `Esc` handlers to break out of the event loop cleanly.
     pub should_exit: bool,
     /// Cross-refresh cache of resolved git info per pane path. Keeps
@@ -92,6 +96,7 @@ impl AppState {
             summary_scroll_running: 0,
             summary_scroll_marked_unread: 0,
             summary_scroll_idle: 0,
+            privacy_mode: false,
             should_exit: false,
             git_cache: crate::group::GitInfoCache::new(),
             session_names: std::collections::HashMap::new(),

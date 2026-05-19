@@ -30,6 +30,10 @@ pub(super) fn handle_event(
                 state.sort_groups_if_needed();
                 return true;
             }
+            KeyCode::Char('p') => {
+                state.privacy_mode = !state.privacy_mode;
+                return true;
+            }
             _ => {}
         }
 

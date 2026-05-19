@@ -21,6 +21,15 @@ use super::text::truncate_to_width;
 
 const ACTIVITY_MAX_ENTRIES: usize = 200;
 
+/// Mask `s` when screenshot/redact mode is on, else pass through.
+fn redact(state: &AppState, s: &str) -> String {
+    if state.privacy_mode {
+        super::text::obfuscate(s)
+    } else {
+        s.to_string()
+    }
+}
+
 pub fn draw_dashboard(frame: &mut Frame, state: &mut AppState) {
     let area = frame.area();
 
@@ -28,10 +37,21 @@ pub fn draw_dashboard(frame: &mut Frame, state: &mut AppState) {
         DashboardTab::Summary => " Summary ",
         DashboardTab::Tiles => " Tiles ",
     };
+    let redacted_marker = if state.privacy_mode {
+        "· REDACTED "
+    } else {
+        ""
+    };
+    let tab_hint = match state.dashboard_tab {
+        DashboardTab::Tiles => "f/z: fold · ",
+        DashboardTab::Summary => "",
+    };
     let outer = Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(
-            format!(" Agents Dashboard ·{tab_label}· Tab: switch · c: clear · q: close "),
+            format!(
+                " Agents Dashboard ·{tab_label}{redacted_marker}· Tab: switch · {tab_hint}c: clear · p: redact · q: close "
+            ),
             Style::default()
                 .fg(state.theme.accent)
                 .add_modifier(Modifier::BOLD),
@@ -491,16 +511,24 @@ fn render_list_with_targets(
         // every section. Width = widest compact age ("11mo") + 1 sep.
         const AGE_SLOT: usize = 5;
         let age_field = match row.age.as_deref() {
-            Some(a) => format!("{:>AGE_SLOT$}", truncate_to_width(a, AGE_SLOT - 1)),
-            None => " ".repeat(AGE_SLOT),
+            Some(a) if !state.privacy_mode => {
+                format!("{:>AGE_SLOT$}", truncate_to_width(a, AGE_SLOT - 1))
+            }
+            _ => " ".repeat(AGE_SLOT),
         };
         // Reason sits between the identity columns and the fixed age
         // column; "  (" + ")" = 4 cells of chrome around it. Padding
         // after the reason keeps the age flush to the right edge.
         let reason_area = available.saturating_sub(IDENT_W + 4 + AGE_SLOT);
-        let repo_cell = format!("{:<REPO_W$}", truncate_to_width(&row.repo, REPO_W));
-        let branch_cell = format!("{:<BRANCH_W$}", truncate_to_width(&row.branch, BRANCH_W));
-        let reason_trim = truncate_to_width(&row.reason, reason_area);
+        let repo_cell = format!(
+            "{:<REPO_W$}",
+            redact(state, &truncate_to_width(&row.repo, REPO_W))
+        );
+        let branch_cell = format!(
+            "{:<BRANCH_W$}",
+            redact(state, &truncate_to_width(&row.branch, BRANCH_W))
+        );
+        let reason_trim = redact(state, &truncate_to_width(&row.reason, reason_area));
         let reason_pad = reason_area.saturating_sub(super::text::display_width(&reason_trim));
         let title_style = Style::default()
             .fg(state.theme.text_active)
@@ -815,12 +843,20 @@ fn format_activity_line<'a>(
     entry: &'a GlobalActivityEntry,
     width: usize,
 ) -> Line<'a> {
-    let repo_label = resolve_repo_label(state, &entry.pane_id);
+    let repo_label = redact(state, &resolve_repo_label(state, &entry.pane_id));
     let tool_color = ratatui::style::Color::Indexed(entry.entry.tool_color_index());
-    let label = truncate_to_width(&entry.entry.label, width.saturating_sub(40));
+    let label = redact(
+        state,
+        &truncate_to_width(&entry.entry.label, width.saturating_sub(40)),
+    );
+    let timestamp = if state.privacy_mode {
+        " ".repeat(super::text::display_width(&entry.entry.timestamp) + 2)
+    } else {
+        format!(" {} ", entry.entry.timestamp)
+    };
     Line::from(vec![
         Span::styled(
-            format!(" {} ", entry.entry.timestamp),
+            timestamp,
             Style::default().fg(state.theme.activity_timestamp),
         ),
         Span::styled(
@@ -1140,7 +1176,7 @@ fn draw_tile(
     };
 
     let icon = state.icons.status_icon(&pane.status);
-    let branch = tile_label(pane, info);
+    let branch = redact(state, &tile_label(pane, info));
 
     let split = Layout::default()
         .direction(Direction::Horizontal)
@@ -1183,11 +1219,11 @@ fn draw_tile(
     let width = inner.width as usize;
 
     let prompt = if !pane.prompt.is_empty() {
-        pane.prompt.clone()
+        redact(state, &pane.prompt)
     } else if !pane.current_command.is_empty() {
-        pane.current_command.clone()
+        redact(state, &pane.current_command)
     } else if !pane.wait_reason.is_empty() {
-        pane.wait_reason.clone()
+        redact(state, &pane.wait_reason)
     } else {
         "—".into()
     };
@@ -1220,7 +1256,10 @@ fn draw_tile(
         } else {
             format!(
                 "▲ {}",
-                truncate_to_width(&pane.wait_reason, width.saturating_sub(used + 4))
+                redact(
+                    state,
+                    &truncate_to_width(&pane.wait_reason, width.saturating_sub(used + 4))
+                )
             )
         };
         let attn_w = super::text::display_width(&attention_text);
@@ -1233,6 +1272,22 @@ fn draw_tile(
             Style::default()
                 .fg(state.theme.badge_danger)
                 .add_modifier(Modifier::BOLD),
+        ));
+    } else if !state.privacy_mode
+        && let Some(age) = pane_age(pane)
+    {
+        let used: usize = footer
+            .iter()
+            .map(|s| super::text::display_width(&s.content))
+            .sum();
+        let age_w = super::text::display_width(&age);
+        let pad = width.saturating_sub(used + age_w);
+        if pad > 0 {
+            footer.push(Span::raw(" ".repeat(pad)));
+        }
+        footer.push(Span::styled(
+            age,
+            Style::default().fg(state.theme.text_muted),
         ));
     }
 
@@ -1255,7 +1310,7 @@ fn draw_group_header(
     let mut spans: Vec<Span> = vec![
         Span::styled("── ", Style::default().fg(state.theme.border_inactive)),
         Span::styled(
-            group_name.to_string(),
+            redact(state, group_name),
             Style::default()
                 .fg(state.theme.accent)
                 .add_modifier(Modifier::BOLD),
