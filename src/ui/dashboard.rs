@@ -499,7 +499,14 @@ fn render_list_with_targets(
                 section,
             });
 
-        let prefix = if selected { "▌ " } else { "  " };
+        let is_focused = !state.tmux_pane.is_empty() && row.pane_id == state.tmux_pane;
+        let prefix = if selected {
+            "▌ "
+        } else if is_focused {
+            "◉ "
+        } else {
+            "  "
+        };
         // Fixed identity columns so repo / branch line up vertically and
         // a long reason can never erase them. 1-cell gap between them.
         const FIXED_OVERHEAD: usize = 2 /* prefix */ + 2 /* icon + space */ + 2 /* glyph + space */;
@@ -539,6 +546,8 @@ fn render_list_with_targets(
             });
         let prefix_style = Style::default().fg(if selected {
             state.theme.accent
+        } else if is_focused {
+            state.theme.badge_plan
         } else {
             state.theme.border_inactive
         });
@@ -921,6 +930,20 @@ const TILE_GAP_V: u16 = 1;
 const GROUP_HEADER_H: u16 = 1;
 const GROUP_SPACER_H: u16 = 1;
 
+/// One vertical block in the tiles view: a group header, optionally a
+/// grid body, and a trailing spacer. Heights are virtual (pre-scroll).
+struct GroupBlock {
+    group_idx: usize,
+    folded: bool,
+    /// Virtual y of the header line, before the scroll offset is applied.
+    virtual_y: i32,
+    /// First global grid-row index for this group's tiles (monotonic
+    /// across non-folded groups; drives `j`/`k` navigation).
+    row_base: usize,
+}
+
+const TILE_STRIDE: i32 = TILE_H as i32 + TILE_GAP_V as i32;
+
 fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
     state.layout.tile_targets.clear();
     state.layout.tile_cols = 0;
@@ -944,145 +967,125 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let cols = (area.width / TILE_TARGET_W).max(1) as usize;
     state.layout.tile_cols = cols;
 
-    // Clamp scroll to a valid group index.
-    let last_group = state.repo_groups.len().saturating_sub(1);
-    if state.tile_scroll_group > last_group {
-        state.tile_scroll_group = last_group;
-    }
-
-    let mut constraints: Vec<Constraint> = Vec::new();
-    let mut group_indices: Vec<usize> = Vec::new();
-    let mut used: u16 = 0;
-    for (idx, group) in state
-        .repo_groups
-        .iter()
-        .enumerate()
-        .skip(state.tile_scroll_group)
-    {
+    // Virtual layout of every non-empty group (full, un-clipped). The
+    // viewport scrolls over this; nothing is dropped, so every tile is
+    // reachable even when the list is taller than the screen.
+    let mut blocks: Vec<GroupBlock> = Vec::new();
+    let mut virtual_y: i32 = 0;
+    let mut row_base: usize = 0;
+    let mut total_tiles: usize = 0;
+    for (idx, group) in state.repo_groups.iter().enumerate() {
         if group.panes.is_empty() {
             continue;
         }
         let folded = !state.expand_all_groups
             && state.expanded_group.as_deref() != Some(group.key.as_str());
-        let group_h = if folded {
-            GROUP_HEADER_H + GROUP_SPACER_H
+        let rows = if folded {
+            0
         } else {
-            let tile_rows = group.panes.len().div_ceil(cols) as u16;
-            GROUP_HEADER_H
-                + tile_rows * TILE_H
-                + tile_rows.saturating_sub(1) * TILE_GAP_V
-                + GROUP_SPACER_H
+            group.panes.len().div_ceil(cols)
         };
-        if used + group_h > area.height && !group_indices.is_empty() {
-            break;
+        let body_h = if folded {
+            0
+        } else {
+            rows as i32 * TILE_H as i32 + rows.saturating_sub(1) as i32 * TILE_GAP_V as i32
+        };
+        blocks.push(GroupBlock {
+            group_idx: idx,
+            folded,
+            virtual_y,
+            row_base,
+        });
+        virtual_y += GROUP_HEADER_H as i32 + body_h + GROUP_SPACER_H as i32;
+        if !folded {
+            row_base += rows;
+            total_tiles += group.panes.len();
         }
-        constraints.push(Constraint::Length(group_h));
-        group_indices.push(idx);
-        used = used.saturating_add(group_h);
     }
-    constraints.push(Constraint::Min(0));
+    let content_h = virtual_y;
 
-    if let (Some(first), Some(last)) = (group_indices.first(), group_indices.last()) {
-        state.layout.tile_visible_first = *first;
-        state.layout.tile_visible_last = *last;
+    // `tile_selected` indexes the (about-to-be-rebuilt) `tile_targets`,
+    // which enumerate every non-folded pane in group order. Clamp it.
+    if total_tiles > 0 && state.tile_selected >= total_tiles {
+        state.tile_selected = total_tiles - 1;
     }
 
-    let sections = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(constraints)
-        .split(area);
+    // Resolve the selected tile's virtual y-range so we can scroll it
+    // into view. Selection order == push order == non-folded panes in
+    // group order.
+    let mut sel_top: Option<i32> = None;
+    {
+        let mut seen = 0usize;
+        'outer: for b in &blocks {
+            if b.folded {
+                continue;
+            }
+            let panes = state.repo_groups[b.group_idx].panes.len();
+            if state.tile_selected < seen + panes {
+                let local = state.tile_selected - seen;
+                let r = (local / cols) as i32;
+                sel_top = Some(b.virtual_y + GROUP_HEADER_H as i32 + r * TILE_STRIDE);
+                break 'outer;
+            }
+            seen += panes;
+        }
+    }
+
+    let max_scroll = (content_h - area.height as i32).max(0);
+    let mut scroll = 0i32;
+    if let Some(top) = sel_top {
+        let bottom = top + TILE_H as i32;
+        if top < scroll {
+            scroll = top;
+        }
+        if bottom > scroll + area.height as i32 {
+            scroll = bottom - area.height as i32;
+        }
+    }
+    scroll = scroll.clamp(0, max_scroll);
 
     let col_constraints: Vec<Constraint> = (0..cols)
         .map(|_| Constraint::Ratio(1, cols as u32))
         .collect();
+    let vp_top = area.y as i32;
+    let vp_bottom = vp_top + area.height as i32;
 
-    // `tile_selected` is an index into the about-to-be-rebuilt
-    // `tile_targets`. In single-group mode that means 0..expanded.panes.len();
-    // in `expand_all_groups` mode it's 0..total visible tiles. The
-    // per-tile clamp happens naturally in the input handler. Here we
-    // only need to make sure a freshly-switched group with a shrunk pane
-    // list doesn't leave selection pointing past the new last tile.
-    if !state.expand_all_groups
-        && let Some(expanded_key) = state.expanded_group.clone()
-        && let Some(group) = state.repo_groups.iter().find(|g| g.key == expanded_key)
-        && !group.panes.is_empty()
-        && state.tile_selected >= group.panes.len()
-    {
-        state.tile_selected = group.panes.len() - 1;
-    }
-
-    let mut global_row: usize = 0;
-    for (slot_idx, group_idx) in group_indices.iter().enumerate() {
-        let group_idx = *group_idx;
-        let section = sections[slot_idx];
-        let group_name = state.repo_groups[group_idx].name.clone();
-        let group_key = state.repo_groups[group_idx].key.clone();
-        let folded = !state.expand_all_groups
-            && state.expanded_group.as_deref() != Some(group_key.as_str());
-
-        if folded {
-            // Header only — skip the grid body.
-            let parts = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(GROUP_HEADER_H),
-                    Constraint::Length(GROUP_SPACER_H),
-                ])
-                .split(section);
-            let group_panes_count = state.repo_groups[group_idx].panes.len();
-            let group_attention = state.repo_groups[group_idx]
+    for b in &blocks {
+        let group_idx = b.group_idx;
+        let header_y = vp_top + b.virtual_y - scroll;
+        if header_y >= vp_top && header_y < vp_bottom {
+            let group_name = state.repo_groups[group_idx].name.clone();
+            let count = state.repo_groups[group_idx].panes.len();
+            let attention = state.repo_groups[group_idx]
                 .panes
                 .iter()
                 .filter(|(p, _)| needs_attention(&p.status, p.attention))
                 .count();
-            draw_group_header(
-                frame,
-                state,
-                parts[0],
-                &group_name,
-                group_panes_count,
-                group_attention,
-            );
+            let hdr = Rect {
+                x: area.x,
+                y: header_y as u16,
+                width: area.width,
+                height: 1,
+            };
+            draw_group_header(frame, state, hdr, &group_name, count, attention);
+        }
+        if b.folded {
             continue;
         }
-
-        let parts = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(GROUP_HEADER_H),
-                Constraint::Min(0),
-                Constraint::Length(GROUP_SPACER_H),
-            ])
-            .split(section);
-
-        let group_panes_count = state.repo_groups[group_idx].panes.len();
-        let group_attention = state.repo_groups[group_idx]
-            .panes
-            .iter()
-            .filter(|(p, _)| needs_attention(&p.status, p.attention))
-            .count();
-        draw_group_header(
-            frame,
-            state,
-            parts[0],
-            &group_name,
-            group_panes_count,
-            group_attention,
-        );
-
-        let group_rows = group_panes_count.div_ceil(cols);
         draw_group_tiles(
             frame,
             state,
-            parts[1],
+            area,
             group_idx,
             &col_constraints,
-            global_row,
+            b.row_base,
+            b.virtual_y + GROUP_HEADER_H as i32,
+            scroll,
         );
-        global_row += group_rows;
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_group_tiles(
     frame: &mut Frame,
     state: &mut AppState,
@@ -1090,40 +1093,41 @@ fn draw_group_tiles(
     group_idx: usize,
     col_constraints: &[Constraint],
     row_offset: usize,
+    body_virtual_y: i32,
+    scroll: i32,
 ) {
     let cols = col_constraints.len();
     let panes_len = state.repo_groups[group_idx].panes.len();
-    let rows = panes_len.div_ceil(cols);
-    let mut row_constraints: Vec<Constraint> = Vec::new();
-    for i in 0..rows {
-        row_constraints.push(Constraint::Length(TILE_H));
-        if i + 1 < rows {
-            row_constraints.push(Constraint::Length(TILE_GAP_V));
-        }
-    }
-    let row_areas = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(row_constraints)
-        .split(area);
+    let vp_top = area.y as i32;
+    let vp_bottom = vp_top + area.height as i32;
 
     for idx in 0..panes_len {
         let row = idx / cols;
         let col = idx % cols;
-        let row_area_idx = row * 2;
-        if row_area_idx >= row_areas.len() {
-            break;
-        }
-        let cell_areas = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints(col_constraints.to_vec())
-            .split(row_areas[row_area_idx]);
-        let cell = cell_areas[col];
-        let gutter = if col + 1 < cols { 1 } else { 0 };
-        let padded = Rect {
-            x: cell.x,
-            y: cell.y,
-            width: cell.width.saturating_sub(gutter),
-            height: cell.height,
+        let tile_y = vp_top + body_virtual_y + row as i32 * TILE_STRIDE - scroll;
+        let visible = tile_y >= vp_top && tile_y + TILE_H as i32 <= vp_bottom;
+
+        let padded = if visible {
+            let band = Rect {
+                x: area.x,
+                y: tile_y as u16,
+                width: area.width,
+                height: TILE_H,
+            };
+            let cell_areas = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints(col_constraints.to_vec())
+                .split(band);
+            let cell = cell_areas[col];
+            let gutter = if col + 1 < cols { 1 } else { 0 };
+            Rect {
+                x: cell.x,
+                y: cell.y,
+                width: cell.width.saturating_sub(gutter),
+                height: cell.height,
+            }
+        } else {
+            Rect::default()
         };
 
         let tile_idx = state.layout.tile_targets.len();
@@ -1134,7 +1138,9 @@ fn draw_group_tiles(
             (p.clone(), info.clone())
         };
         let pane_id = pane_clone.pane_id.clone();
-        draw_tile(frame, state, padded, &pane_clone, &info_clone, selected);
+        if visible {
+            draw_tile(frame, state, padded, &pane_clone, &info_clone, selected);
+        }
         state.layout.tile_targets.push(crate::state::TileTarget {
             rect: padded,
             pane_id,
@@ -1167,8 +1173,11 @@ fn draw_tile(
 
     let attention =
         pane.attention || matches!(pane.status, PaneStatus::Waiting | PaneStatus::Error);
+    let is_focused = !state.tmux_pane.is_empty() && pane.pane_id == state.tmux_pane;
     let border_color = if selected {
         state.theme.accent
+    } else if is_focused {
+        state.theme.badge_plan
     } else if attention {
         state.theme.badge_danger
     } else {
@@ -1208,8 +1217,18 @@ fn draw_tile(
             ),
             Span::raw(" "),
             Span::styled(
-                format!("{branch} "),
-                Style::default().fg(color).add_modifier(Modifier::BOLD),
+                if is_focused {
+                    format!("◉ {branch} ")
+                } else {
+                    format!("{branch} ")
+                },
+                Style::default()
+                    .fg(if is_focused {
+                        state.theme.badge_plan
+                    } else {
+                        color
+                    })
+                    .add_modifier(Modifier::BOLD),
             ),
         ]))
         .style(Style::default().fg(border_color));

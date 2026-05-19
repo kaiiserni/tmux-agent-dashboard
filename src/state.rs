@@ -88,7 +88,7 @@ impl AppState {
             tile_selected: 0,
             tile_scroll_group: 0,
             expanded_group: None,
-            expand_all_groups: false,
+            expand_all_groups: true,
             summary_selected: 0,
             summary_scroll_attention: 0,
             summary_scroll_waiting: 0,

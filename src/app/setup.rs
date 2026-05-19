@@ -7,6 +7,10 @@ pub(super) fn init_state(tmux_pane: String) -> AppState {
     state.theme = ui::colors::ColorTheme::from_tmux();
     state.icons = ui::icons::StatusIcons::from_tmux();
     state.refresh();
-    super::input::init_expanded_group(&mut state);
+    // Tiles view defaults to all-expanded; only seed a single expanded
+    // group when that mode is off so the `f` cycle has a target.
+    if !state.expand_all_groups {
+        super::input::init_expanded_group(&mut state);
+    }
     state
 }
