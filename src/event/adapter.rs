@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use super::AgentEvent;
 use crate::adapter;
-use crate::tmux::{ANTIGRAVITY_AGENT, CLAUDE_AGENT, CODEX_AGENT, OPENCODE_AGENT};
+use crate::tmux::{ANTIGRAVITY_AGENT, CLAUDE_AGENT, CODEX_AGENT, OPENCODE_AGENT, PI_AGENT};
 
 pub trait EventAdapter {
     fn parse(&self, event_name: &str, input: &Value) -> Option<AgentEvent>;
@@ -14,6 +14,7 @@ pub fn resolve_adapter(agent_name: &str) -> Option<Box<dyn EventAdapter>> {
         CODEX_AGENT => Some(Box::new(adapter::codex::CodexAdapter)),
         OPENCODE_AGENT => Some(Box::new(adapter::opencode::OpenCodeAdapter)),
         ANTIGRAVITY_AGENT => Some(Box::new(adapter::antigravity::AntigravityAdapter)),
+        PI_AGENT => Some(Box::new(adapter::pi::PiAdapter)),
         _ => None,
     }
 }

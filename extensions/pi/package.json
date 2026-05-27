@@ -1,0 +1,22 @@
+{
+  "name": "pi-tmux-agent-dashboard",
+  "version": "0.1.0",
+  "description": "Pi extension that forwards session/prompt/tool/stop events to tmux-agent-dashboard so Pi panes show up in the dashboard.",
+  "main": "./index.ts",
+  "license": "MIT",
+  "files": [
+    "index.ts",
+    "README.md"
+  ],
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "tmux",
+    "dashboard"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

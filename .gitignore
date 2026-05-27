@@ -6,3 +6,4 @@ Cargo.lock
 *.bak
 .DS_Store
 /tmp/
+/.pi/

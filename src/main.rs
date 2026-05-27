@@ -219,6 +219,7 @@ fn format_entry(e: &PendingEntry) -> String {
         tmux::AgentType::Codex => 141,
         tmux::AgentType::OpenCode => 117,
         tmux::AgentType::Antigravity => 75,
+        tmux::AgentType::Pi => 213,
         tmux::AgentType::Unknown => 244,
     };
     let reason = if !e.wait_reason.is_empty() {

@@ -19,6 +19,7 @@ pub struct ColorTheme {
     pub agent_codex: Color,
     pub agent_opencode: Color,
     pub agent_antigravity: Color,
+    pub agent_pi: Color,
     pub text_active: Color,
     pub text_muted: Color,
     pub text_inactive: Color,
@@ -50,6 +51,7 @@ impl Default for ColorTheme {
             agent_codex: Color::Indexed(141),
             agent_opencode: Color::Indexed(117),
             agent_antigravity: Color::Indexed(75),
+            agent_pi: Color::Indexed(213),
             text_active: Color::Indexed(255),
             text_muted: Color::Indexed(252),
             text_inactive: Color::Indexed(244),
@@ -95,6 +97,7 @@ impl ColorTheme {
             tmux::SIDEBAR_COLOR_AGENT_ANTIGRAVITY,
             theme.agent_antigravity,
         );
+        theme.agent_pi = read(tmux::SIDEBAR_COLOR_AGENT_PI, theme.agent_pi);
         theme.text_active = read(tmux::SIDEBAR_COLOR_TEXT_ACTIVE, theme.text_active);
         theme.text_muted = read(tmux::SIDEBAR_COLOR_TEXT_MUTED, theme.text_muted);
         theme.text_inactive = read(tmux::SIDEBAR_COLOR_TEXT_INACTIVE, theme.text_inactive);
@@ -121,6 +124,7 @@ impl ColorTheme {
             AgentType::Codex => self.agent_codex,
             AgentType::OpenCode => self.agent_opencode,
             AgentType::Antigravity => self.agent_antigravity,
+            AgentType::Pi => self.agent_pi,
             AgentType::Unknown => self.status_unknown,
         }
     }
