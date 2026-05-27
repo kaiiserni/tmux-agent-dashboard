@@ -1,6 +1,7 @@
 pub const CLAUDE_AGENT: &str = "claude";
 pub const CODEX_AGENT: &str = "codex";
 pub const OPENCODE_AGENT: &str = "opencode";
+pub const ANTIGRAVITY_AGENT: &str = "antigravity";
 
 #[derive(Debug, Clone)]
 pub struct PaneInfo {
@@ -89,6 +90,7 @@ pub enum AgentType {
     Claude,
     Codex,
     OpenCode,
+    Antigravity,
     Unknown,
 }
 
@@ -112,6 +114,7 @@ impl AgentType {
             CLAUDE_AGENT => Some(Self::Claude),
             CODEX_AGENT => Some(Self::Codex),
             OPENCODE_AGENT => Some(Self::OpenCode),
+            ANTIGRAVITY_AGENT => Some(Self::Antigravity),
             _ => None,
         }
     }
@@ -123,6 +126,7 @@ impl AgentType {
             Self::Claude => "✦",
             Self::Codex => "◉",
             Self::OpenCode => "◇",
+            Self::Antigravity => "▲",
             Self::Unknown => "·",
         }
     }

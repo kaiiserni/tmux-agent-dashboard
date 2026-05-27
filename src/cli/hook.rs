@@ -35,6 +35,13 @@ pub fn cmd_hook(args: &[String]) -> i32 {
         return 0;
     }
 
+    // Some agents (e.g. agy v1.0.x) only fire PreToolUse/PostToolUse/Stop —
+    // no SessionStart/UserPromptSubmit lifecycle. Claim the pane on any hook
+    // so the dashboard sees it.
+    if crate::tmux::get_pane_option_value(&pane, crate::tmux::PANE_AGENT).is_empty() {
+        crate::tmux::set_pane_option(&pane, crate::tmux::PANE_AGENT, agent_name);
+    }
+
     let input = read_stdin_json();
     let Some(event) = adapter.parse(event_name, &input) else {
         return 0;

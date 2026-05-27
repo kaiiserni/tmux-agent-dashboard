@@ -663,6 +663,7 @@ fn agent_color(state: &AppState, agent: &crate::tmux::AgentType) -> ratatui::sty
         crate::tmux::AgentType::Claude => state.theme.agent_claude,
         crate::tmux::AgentType::Codex => state.theme.agent_codex,
         crate::tmux::AgentType::OpenCode => state.theme.agent_opencode,
+        crate::tmux::AgentType::Antigravity => state.theme.agent_antigravity,
         crate::tmux::AgentType::Unknown => state.theme.text_muted,
     }
 }
