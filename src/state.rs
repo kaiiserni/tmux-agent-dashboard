@@ -64,6 +64,10 @@ pub struct AppState {
     /// columns and masks all free-text content (repo, branch, reason,
     /// prompt, group headers, activity labels).
     pub privacy_mode: bool,
+    /// When `true`, force the technical view (repo + branch) regardless
+    /// of whether `@pane_name` is set. Loaded from / persisted to the
+    /// tmux global option `@dashboard_show_technical_names`.
+    pub show_technical_names: bool,
     /// Set by `q` / `Esc` handlers to break out of the event loop cleanly.
     pub should_exit: bool,
     /// Cross-refresh cache of resolved git info per pane path. Keeps
@@ -101,6 +105,11 @@ impl AppState {
             summary_scroll_marked_unread: 0,
             summary_scroll_idle: 0,
             privacy_mode: false,
+            show_technical_names: crate::tmux::get_option(
+                crate::tmux::DASHBOARD_SHOW_TECHNICAL_NAMES,
+            )
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false),
             should_exit: false,
             git_cache: crate::group::GitInfoCache::new(),
             session_names: std::collections::HashMap::new(),

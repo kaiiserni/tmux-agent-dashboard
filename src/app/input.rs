@@ -34,6 +34,14 @@ pub(super) fn handle_event(
                 state.privacy_mode = !state.privacy_mode;
                 return true;
             }
+            KeyCode::Char('n') => {
+                state.show_technical_names = !state.show_technical_names;
+                crate::tmux::set_global_option(
+                    crate::tmux::DASHBOARD_SHOW_TECHNICAL_NAMES,
+                    if state.show_technical_names { "1" } else { "0" },
+                );
+                return true;
+            }
             _ => {}
         }
 

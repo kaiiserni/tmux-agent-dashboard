@@ -27,7 +27,22 @@ pub struct PaneInfo {
     pub permission_mode: PermissionMode,
     pub worktree: WorktreeMetadata,
     pub session_id: Option<String>,
+    /// Claude session label resolved from `~/.claude/sessions/*.json`
+    /// using `session_id`. Empty if no matching Claude session file.
     pub session_name: String,
+    /// Tmux session this pane belongs to (e.g. `cc-helion-orbit`).
+    /// Always populated.
+    pub tmux_session_name: String,
+    /// Friendly pane label set via Claude's `/rename` (stored in tmux as
+    /// `@pane_name`). Empty when the user never renamed the pane.
+    pub pane_name: String,
+    /// Tmux window name (e.g. set via `prefix + ,` or `rename-window`).
+    /// Always populated; meaningful as a friendly label only when
+    /// `auto_rename == false`.
+    pub window_name: String,
+    /// `true` when tmux's `automatic-rename` option is on for the
+    /// window — i.e. `window_name` is process-derived, not user-chosen.
+    pub auto_rename: bool,
     /// Recorded `run_in_background` command (sticky per session). Used to
     /// probe whether a `Background` pane's shell is actually still alive.
     pub bg_cmd: String,

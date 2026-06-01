@@ -52,6 +52,9 @@ mod tests {
     #[test]
     fn epoch_and_future_are_none() {
         assert_eq!(compact_ago(UNIX_EPOCH), None);
-        assert_eq!(compact_ago(SystemTime::now() + Duration::from_secs(60)), None);
+        assert_eq!(
+            compact_ago(SystemTime::now() + Duration::from_secs(60)),
+            None
+        );
     }
 }

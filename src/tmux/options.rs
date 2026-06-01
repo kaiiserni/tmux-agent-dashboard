@@ -35,6 +35,14 @@ pub const PANE_WAIT_REASON: &str = "@pane_wait_reason";
 pub const PANE_WORKTREE_BRANCH: &str = "@pane_worktree_branch";
 pub const PANE_WORKTREE_NAME: &str = "@pane_worktree_name";
 
+// ─── Dashboard-global preference keys ────────────────────────────────
+
+/// When `1`, the dashboard forces the technical view (repo + branch)
+/// regardless of `@pane_name` / session_name being set. Toggled via the
+/// `n` key. Persisted as a tmux global option so it survives binary
+/// restart.
+pub const DASHBOARD_SHOW_TECHNICAL_NAMES: &str = "@dashboard_show_technical_names";
+
 /// Stored in `@pane_bg_cmd` when the background Bash invocation arrives
 /// without a command string we can echo back to the user.
 pub const BG_CMD_PLACEHOLDER: &str = "(background shell)";

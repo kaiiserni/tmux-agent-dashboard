@@ -21,6 +21,7 @@ mod session_line_field {
     pub const WINDOW_ID: usize = 1;
     pub const WINDOW_NAME: usize = 3;
     pub const WINDOW_ACTIVE: usize = 4;
+    pub const AUTOMATIC_RENAME: usize = 5;
     pub const PANE_LINE_OFFSET: usize = 6;
     pub const MIN_FIELDS: usize = 27;
 }
@@ -30,6 +31,7 @@ mod pane_line_field {
     pub const PANE_STATUS: usize = 1;
     pub const PANE_ATTENTION: usize = 2;
     pub const AGENT: usize = 3;
+    pub const PANE_NAME: usize = 4;
     pub const PANE_CURRENT_PATH: usize = 5;
     pub const PANE_CURRENT_COMMAND: usize = 6;
     pub const PANE_ROLE: usize = 7;
@@ -120,7 +122,10 @@ pub fn query_sessions() -> Vec<SessionInfo> {
                 panes: Vec::new(),
             });
 
-        if let Some(pane) = parse_pane_fields(pane_fields) {
+        if let Some(mut pane) = parse_pane_fields(pane_fields) {
+            pane.window_name = parts[session_line_field::WINDOW_NAME].to_string();
+            pane.auto_rename = parts[session_line_field::AUTOMATIC_RENAME] == "1";
+            pane.tmux_session_name = session_name.to_string();
             window.panes.push(pane);
         }
     }
@@ -202,6 +207,10 @@ fn parse_pane_fields(parts: &[String]) -> Option<PaneInfo> {
         },
         session_id,
         session_name: String::new(),
+        tmux_session_name: String::new(),
+        pane_name: parts[pane_line_field::PANE_NAME].to_string(),
+        window_name: String::new(),
+        auto_rename: false,
         bg_cmd: parts[pane_line_field::BG_CMD].to_string(),
     })
 }

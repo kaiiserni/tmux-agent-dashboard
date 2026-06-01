@@ -43,6 +43,10 @@ pub fn get_pane_option_value(pane_id: &str, key: &str) -> String {
         .unwrap_or_default()
 }
 
+pub fn set_global_option(key: &str, value: &str) {
+    let _ = run_tmux(&["set", "-g", key, value]);
+}
+
 pub fn get_all_global_options() -> std::collections::HashMap<String, String> {
     let out = run_tmux(&["show", "-g"]).unwrap_or_default();
     let mut map = std::collections::HashMap::new();

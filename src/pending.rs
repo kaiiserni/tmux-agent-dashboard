@@ -41,10 +41,14 @@ pub fn collect_pending() -> Vec<PendingEntry> {
     let mut groups: Vec<RepoGroup> = group_panes_by_repo(&sessions);
     sweep_stale_marks(&mut groups);
 
+    let show_technical = tmux::get_option(tmux::DASHBOARD_SHOW_TECHNICAL_NAMES)
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+
     let mut out: Vec<PendingEntry> = Vec::new();
     for group in &groups {
         for (pane, info) in &group.panes {
-            if let Some(entry) = classify(pane, info, &group.name) {
+            if let Some(entry) = classify(pane, info, &group.name, show_technical) {
                 out.push(entry);
             }
         }
@@ -60,7 +64,12 @@ pub fn collect_pending() -> Vec<PendingEntry> {
     out
 }
 
-fn classify(pane: &PaneInfo, info: &PaneGitInfo, repo: &str) -> Option<PendingEntry> {
+fn classify(
+    pane: &PaneInfo,
+    info: &PaneGitInfo,
+    repo: &str,
+    show_technical: bool,
+) -> Option<PendingEntry> {
     let mtime = log_mtime(&pane.pane_id).unwrap_or(SystemTime::UNIX_EPOCH);
     let priority = if pane.attention {
         Priority::Attention
@@ -74,16 +83,43 @@ fn classify(pane: &PaneInfo, info: &PaneGitInfo, repo: &str) -> Option<PendingEn
         }
     };
 
+    let (repo, label) = if show_technical {
+        (repo.to_string(), label_technical(pane, info))
+    } else {
+        let r = if !pane.tmux_session_name.is_empty() {
+            pane.tmux_session_name.clone()
+        } else {
+            repo.to_string()
+        };
+        let friendly = friendly_pane_label(pane);
+        let l = if friendly.is_empty() {
+            label_technical(pane, info)
+        } else {
+            friendly
+        };
+        (r, l)
+    };
+
     Some(PendingEntry {
         priority,
         pane_id: pane.pane_id.clone(),
-        repo: repo.to_string(),
-        label: label(pane, info),
+        repo,
+        label,
         status: pane.status.clone(),
         mtime,
         wait_reason: pane.wait_reason.clone(),
         agent: pane.agent.clone(),
     })
+}
+
+fn friendly_pane_label(pane: &PaneInfo) -> String {
+    if !pane.pane_name.is_empty() {
+        return pane.pane_name.clone();
+    }
+    if !pane.auto_rename && !pane.window_name.is_empty() {
+        return pane.window_name.clone();
+    }
+    String::new()
 }
 
 fn is_unseen(pane: &PaneInfo, mtime: SystemTime) -> bool {
@@ -133,7 +169,7 @@ pub fn sweep_stale_marks(groups: &mut [crate::group::RepoGroup]) {
     }
 }
 
-fn label(pane: &PaneInfo, info: &PaneGitInfo) -> String {
+fn label_technical(pane: &PaneInfo, info: &PaneGitInfo) -> String {
     if !pane.session_name.is_empty() {
         return pane.session_name.clone();
     }

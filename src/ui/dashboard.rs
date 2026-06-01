@@ -46,11 +46,16 @@ pub fn draw_dashboard(frame: &mut Frame, state: &mut AppState) {
         DashboardTab::Tiles => "f/z: fold · a: active-only · ",
         DashboardTab::Summary => "",
     };
+    let names_hint = if state.show_technical_names {
+        "n: friendly · "
+    } else {
+        "n: technical · "
+    };
     let outer = Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(
             format!(
-                " Agents Dashboard ·{tab_label}{redacted_marker}· Tab: switch · {tab_hint}c: clear · p: redact · q: close "
+                " Agents Dashboard ·{tab_label}{redacted_marker}· Tab: switch · {tab_hint}{names_hint}c: clear · p: redact · q: close "
             ),
             Style::default()
                 .fg(state.theme.accent)
@@ -242,17 +247,12 @@ fn needs_attention(status: &PaneStatus, attention: bool) -> bool {
 /// Tiles "active-only" filter (toggled with `a`): a pane is hidden only
 /// when it is pure idle — no attention flag, not marked unread.
 fn tile_active(pane: &PaneInfo) -> bool {
-    !matches!(pane.status, PaneStatus::Idle)
-        || pane.attention
-        || pane.marked_unread_at.is_some()
+    !matches!(pane.status, PaneStatus::Idle) || pane.attention || pane.marked_unread_at.is_some()
 }
 
 /// Indices into `group.panes` that should be rendered in the Tiles view
 /// under the current filter setting.
-fn visible_pane_indices(
-    group: &crate::group::RepoGroup,
-    hide_idle: bool,
-) -> Vec<usize> {
+fn visible_pane_indices(group: &crate::group::RepoGroup, hide_idle: bool) -> Vec<usize> {
     if hide_idle {
         group
             .panes
@@ -292,9 +292,7 @@ fn pane_priority_key(p: &PaneInfo) -> (u8, u8, std::cmp::Reverse<u64>) {
 /// by pane priority (urgent first). Use for the Summary tab so the Idle
 /// / Waiting / etc. lists show the most-urgent panes first regardless of
 /// which repo they belong to.
-fn sorted_summary_panes(
-    state: &AppState,
-) -> Vec<(String, &PaneInfo, &crate::group::PaneGitInfo)> {
+fn sorted_summary_panes(state: &AppState) -> Vec<(String, &PaneInfo, &crate::group::PaneGitInfo)> {
     let mut v: Vec<_> = state
         .repo_groups
         .iter()
@@ -318,14 +316,14 @@ fn draw_attention(frame: &mut Frame, state: &mut AppState, area: Rect) {
         .into_iter()
         .filter(|(_, p, _)| p.attention)
         .map(|(group_name, p, info)| {
-            let branch = resolve_branch(p, info);
+            let (repo, branch) = friendly_row_labels(p, info, &group_name, state);
             SummaryRow {
                 status_icon: state.icons.status_icon(&p.status).to_string(),
                 status_color: state.theme.badge_danger,
                 agent_glyph: p.agent.glyph(),
                 agent_color: agent_color(state, &p.agent),
-                repo: group_name.clone(),
-                branch: branch.clone(),
+                repo,
+                branch,
                 reason: if !p.wait_reason.is_empty() {
                     p.wait_reason.clone()
                 } else {
@@ -359,7 +357,7 @@ fn draw_waiting(frame: &mut Frame, state: &mut AppState, area: Rect) {
         .into_iter()
         .filter(|(_, p, _)| matches!(p.status, PaneStatus::Waiting | PaneStatus::Error))
         .map(|(group_name, p, info)| {
-            let branch = resolve_branch(p, info);
+            let (repo, branch) = friendly_row_labels(p, info, &group_name, state);
             SummaryRow {
                 status_icon: state.icons.status_icon(&p.status).to_string(),
                 status_color: if matches!(p.status, PaneStatus::Error) {
@@ -369,8 +367,8 @@ fn draw_waiting(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 },
                 agent_glyph: p.agent.glyph(),
                 agent_color: agent_color(state, &p.agent),
-                repo: group_name.clone(),
-                branch: branch.clone(),
+                repo,
+                branch,
                 reason: if !p.wait_reason.is_empty() {
                     p.wait_reason.clone()
                 } else if matches!(p.status, PaneStatus::Error) {
@@ -406,14 +404,14 @@ fn draw_running(frame: &mut Frame, state: &mut AppState, area: Rect) {
         .into_iter()
         .filter(|(_, p, _)| matches!(p.status, PaneStatus::Running | PaneStatus::Background))
         .map(|(group_name, p, info)| {
-            let branch = resolve_branch(p, info);
+            let (repo, branch) = friendly_row_labels(p, info, &group_name, state);
             SummaryRow {
                 status_icon: state.icons.status_icon(&p.status).to_string(),
                 status_color: state.theme.status_running,
                 agent_glyph: p.agent.glyph(),
                 agent_color: agent_color(state, &p.agent),
-                repo: group_name.clone(),
-                branch: branch.clone(),
+                repo,
+                branch,
                 reason: if !p.prompt.is_empty() {
                     p.prompt.clone()
                 } else if !p.current_command.is_empty() {
@@ -463,6 +461,71 @@ fn resolve_branch(pane: &PaneInfo, info: &crate::group::PaneGitInfo) -> String {
         return pane.worktree.branch.clone();
     }
     "-".into()
+}
+
+/// Pick the (repo, branch) cell content for a Summary row. When the
+/// global "show technical names" toggle is off, each cell is replaced
+/// independently:
+///   • repo → tmux session name (e.g. `cc-helion-orbit`) when present,
+///     else group name
+///   • branch → `@pane_name` (Claude `/rename`) > tmux window_name (when
+///     `automatic-rename` is off) > technical branch label
+fn friendly_row_labels(
+    pane: &PaneInfo,
+    info: &crate::group::PaneGitInfo,
+    group_name: &str,
+    state: &AppState,
+) -> (String, String) {
+    if state.show_technical_names {
+        return (group_name.to_string(), resolve_branch(pane, info));
+    }
+    let repo = if !pane.tmux_session_name.is_empty() {
+        pane.tmux_session_name.clone()
+    } else {
+        group_name.to_string()
+    };
+    let friendly = friendly_pane_label(pane);
+    let branch = if friendly.is_empty() {
+        resolve_branch(pane, info)
+    } else {
+        friendly
+    };
+    (repo, branch)
+}
+
+/// Group-header label in the Tiles view. When `show_technical_names`
+/// is off, replace the repo-derived name with the distinct tmux
+/// session names of the panes inside the group (one repo can host
+/// panes from multiple sessions — show all so the user can tell them
+/// apart). Falls back to the technical name when no sessions are
+/// known.
+fn friendly_group_name(group: &crate::group::RepoGroup, state: &AppState) -> String {
+    if state.show_technical_names {
+        return group.name.clone();
+    }
+    let mut seen: Vec<String> = Vec::new();
+    for (p, _) in &group.panes {
+        if !p.tmux_session_name.is_empty() && !seen.contains(&p.tmux_session_name) {
+            seen.push(p.tmux_session_name.clone());
+        }
+    }
+    if seen.is_empty() {
+        group.name.clone()
+    } else {
+        seen.join(", ")
+    }
+}
+
+/// Best friendly label for a pane regardless of context. Returns "" if
+/// the user hasn't named the pane or its window in any way.
+fn friendly_pane_label(pane: &PaneInfo) -> String {
+    if !pane.pane_name.is_empty() {
+        return pane.pane_name.clone();
+    }
+    if !pane.auto_rename && !pane.window_name.is_empty() {
+        return pane.window_name.clone();
+    }
+    String::new()
 }
 
 struct SummaryRow {
@@ -685,7 +748,7 @@ fn draw_responded(frame: &mut Frame, state: &mut AppState, area: Rect) {
         .into_iter()
         .filter(|(_, p, _)| matches!(p.status, PaneStatus::Idle) && pane_is_unseen(p))
         .map(|(group_name, p, info)| {
-            let branch = resolve_branch(p, info);
+            let (repo, branch) = friendly_row_labels(p, info, &group_name, state);
             let mtime = crate::activity::log_mtime(&p.pane_id).unwrap_or(std::time::UNIX_EPOCH);
             let last_entry = crate::activity::read_activity_log(&p.pane_id, 1)
                 .into_iter()
@@ -706,8 +769,8 @@ fn draw_responded(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 status_color: state.theme.badge_auto,
                 agent_glyph: p.agent.glyph(),
                 agent_color: agent_color(state, &p.agent),
-                repo: group_name.clone(),
-                branch: branch.clone(),
+                repo,
+                branch,
                 reason,
                 age: pane_age(p),
                 pane_id: p.pane_id.clone(),
@@ -749,7 +812,7 @@ fn draw_marked_unread(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 && !crate::pending::pane_is_unseen(p)
         })
         .map(|(group_name, p, info)| {
-            let branch = resolve_branch(p, info);
+            let (repo, branch) = friendly_row_labels(p, info, &group_name, state);
             let marked_at = p.marked_unread_at.unwrap_or(0);
             let reason = if !p.prompt.is_empty() {
                 p.prompt.clone()
@@ -761,8 +824,8 @@ fn draw_marked_unread(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 status_color: state.theme.badge_plan,
                 agent_glyph: p.agent.glyph(),
                 agent_color: agent_color(state, &p.agent),
-                repo: group_name.clone(),
-                branch: branch.clone(),
+                repo,
+                branch,
                 reason,
                 // Pinned parking lot — keep it clean, no age column.
                 age: None,
@@ -803,7 +866,7 @@ fn draw_idle(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 && p.marked_unread_at.is_none()
         })
         .map(|(group_name, p, info)| {
-            let branch = resolve_branch(p, info);
+            let (repo, branch) = friendly_row_labels(p, info, &group_name, state);
             let mtime = crate::activity::log_mtime(&p.pane_id).unwrap_or(std::time::UNIX_EPOCH);
             // Prefer the last assistant message / user prompt (same source
             // Running and Responded use). Fall back to the latest activity
@@ -827,8 +890,8 @@ fn draw_idle(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 status_color: state.theme.status_idle,
                 agent_glyph: p.agent.glyph(),
                 agent_color: agent_color(state, &p.agent),
-                repo: group_name.clone(),
-                branch: branch.clone(),
+                repo,
+                branch,
                 reason,
                 age: pane_age(p),
                 pane_id: p.pane_id.clone(),
@@ -915,6 +978,9 @@ fn resolve_repo_label(state: &AppState, pane_id: &str) -> String {
     for group in &state.repo_groups {
         for (pane, _) in &group.panes {
             if pane.pane_id == pane_id {
+                if !state.show_technical_names && !pane.tmux_session_name.is_empty() {
+                    return pane.tmux_session_name.clone();
+                }
                 return group.name.clone();
             }
         }
@@ -929,7 +995,13 @@ fn resolve_repo_label(state: &AppState, pane_id: &str) -> String {
 /// agent, then falls back through git branch, worktree, working
 /// directory basename, and pane id so the label never flickers to a
 /// placeholder while async data is in flight.
-fn tile_label(pane: &PaneInfo, info: &crate::group::PaneGitInfo) -> String {
+fn tile_label(pane: &PaneInfo, info: &crate::group::PaneGitInfo, state: &AppState) -> String {
+    if !state.show_technical_names {
+        let friendly = friendly_pane_label(pane);
+        if !friendly.is_empty() {
+            return friendly;
+        }
+    }
     if !pane.session_name.is_empty() {
         return pane.session_name.clone();
     }
@@ -1018,9 +1090,13 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
         if visible.is_empty() {
             continue;
         }
-        let folded = !state.expand_all_groups
-            && state.expanded_group.as_deref() != Some(group.key.as_str());
-        let rows = if folded { 0 } else { visible.len().div_ceil(cols) };
+        let folded =
+            !state.expand_all_groups && state.expanded_group.as_deref() != Some(group.key.as_str());
+        let rows = if folded {
+            0
+        } else {
+            visible.len().div_ceil(cols)
+        };
         let body_h = if folded {
             0
         } else {
@@ -1056,8 +1132,7 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
             if b.folded {
                 continue;
             }
-            let panes =
-                visible_pane_indices(&state.repo_groups[b.group_idx], hide_idle).len();
+            let panes = visible_pane_indices(&state.repo_groups[b.group_idx], hide_idle).len();
             if state.tile_selected < seen + panes {
                 let local = state.tile_selected - seen;
                 let r = (local / cols) as i32;
@@ -1091,9 +1166,8 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
         let group_idx = b.group_idx;
         let header_y = vp_top + b.virtual_y - scroll;
         if header_y >= vp_top && header_y < vp_bottom {
-            let group_name = state.repo_groups[group_idx].name.clone();
-            let visible_for_header =
-                visible_pane_indices(&state.repo_groups[group_idx], hide_idle);
+            let group_name = friendly_group_name(&state.repo_groups[group_idx], state);
+            let visible_for_header = visible_pane_indices(&state.repo_groups[group_idx], hide_idle);
             let count = visible_for_header.len();
             let attention = visible_for_header
                 .iter()
@@ -1229,7 +1303,7 @@ fn draw_tile(
     };
 
     let icon = state.icons.status_icon(&pane.status);
-    let branch = redact(state, &tile_label(pane, info));
+    let branch = redact(state, &tile_label(pane, info, state));
 
     let split = Layout::default()
         .direction(Direction::Horizontal)

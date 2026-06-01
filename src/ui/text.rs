@@ -13,7 +13,9 @@ pub fn obfuscate(text: &str) -> String {
         if ch.is_whitespace() {
             out.push(ch);
         } else {
-            let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1).max(1);
+            let w = unicode_width::UnicodeWidthChar::width(ch)
+                .unwrap_or(1)
+                .max(1);
             out.extend(std::iter::repeat_n('•', w));
         }
     }
