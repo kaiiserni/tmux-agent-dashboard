@@ -871,7 +871,8 @@ fn draw_responded(frame: &mut Frame, state: &mut AppState, area: Rect) {
         })
         .collect();
 
-    rows.sort_by(|a, b| b.1.cmp(&a.1));
+    // Oldest first: Responded is a review queue, top = next to handle.
+    rows.sort_by(|a, b| a.1.cmp(&b.1));
     let rows: Vec<SummaryRow> = rows.into_iter().map(|(r, _)| r).collect();
 
     if rows.is_empty() {
