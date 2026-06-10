@@ -12,7 +12,7 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 use tmux_agent_dashboard::{
-    app,
+    app, cli,
     cli::hook,
     pending::{self, PendingEntry, Priority},
     tmux,
@@ -69,6 +69,10 @@ fn main() -> io::Result<()> {
         }
         Some("hook") => {
             let code = hook::cmd_hook(&args[1..]);
+            std::process::exit(code);
+        }
+        Some("notify-daemon") => {
+            let code = cli::notify::cmd_notify_daemon();
             std::process::exit(code);
         }
         Some("--version") | Some("version") => {

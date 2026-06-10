@@ -34,3 +34,17 @@ fi
 tmux set -g @dashboard_bin "$BIN"
 
 tmux source-file "$PLUGIN_DIR/agent-dashboard.conf"
+
+# Notification daemon: when @dashboard_notify_webhook is set, run the
+# poller in the background. Guard against duplicate instances via a
+# pidfile + liveness check so re-sourcing the plugin doesn't stack daemons.
+if [[ -n "$(tmux show -gv @dashboard_notify_webhook 2>/dev/null)" ]]; then
+    PIDFILE="/tmp/tmux-agent-dashboard-notify.pid"
+    RUNNING=0
+    if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null; then
+        RUNNING=1
+    fi
+    if [[ "$RUNNING" -eq 0 ]]; then
+        tmux run-shell -b "'$BIN' notify-daemon & echo \$! > '$PIDFILE'"
+    fi
+fi

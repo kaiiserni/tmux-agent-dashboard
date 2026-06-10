@@ -72,6 +72,41 @@ set -g @dashboard_height '85%'    # default
 The sidebar's `@sidebar_color_*` and `@sidebar_icon_*` options are
 reused so visual customisation carries over.
 
+## Notifications
+
+A background daemon can push a Google Chat message whenever a pane
+transitions into an attention-worthy state (an explicit attention flag,
+or status Waiting / Error) — handy when you work remotely over
+mosh/ssh and don't want to keep opening the popup.
+
+1. In Google Chat, open the target space → space name → **Apps &
+   integrations** → **Webhooks** → **Add webhook**, and copy the URL.
+2. Point the dashboard at it:
+
+   ```tmux
+   set -g @dashboard_notify_webhook 'https://chat.googleapis.com/v1/spaces/AAAA/messages?key=...&token=...'
+   ```
+
+   (Or export `DASHBOARD_NOTIFY_WEBHOOK` in the environment as a
+   fallback.)
+
+When `@dashboard_notify_webhook` is set, the plugin auto-starts the
+daemon on load (guarded against duplicate instances via
+`/tmp/tmux-agent-dashboard-notify.pid`). It polls every ~5s and applies
+a 60s per-pane cooldown so a flapping pane won't spam the space.
+
+Run it standalone:
+
+```bash
+tmux-agent-dashboard notify-daemon
+```
+
+Messages look like `⚠ auth refactor (cc-helion:editor) — waiting · …`,
+using the friendly pane name when set. Activity is appended to
+`/tmp/tmux-agent-dashboard-notify.log` (start/stop and sent
+notifications; the webhook URL is never logged). With no webhook
+configured the daemon exits with a message on stderr.
+
 ## Architecture
 
 - `prefix + ñ` triggers `tmux display-popup -E "<bin>"` which runs the
