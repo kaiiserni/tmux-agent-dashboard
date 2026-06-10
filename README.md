@@ -56,6 +56,8 @@ run-shell '~/projects/tmux-agent-dashboard/tmux-agent-dashboard.tmux'
 | Mouse wheel | Scroll the list under the cursor |
 | `q` / `Esc` | Close popup |
 
+The header items are clickable too: clicking one runs the matching key (and clicking the tab label or `Tab: switch` flips the view).
+
 Each tile in the Tiles view also shows a context-preview line: the pane's
 most recent activity-log entry (tool, label, and age). Hidden in redact mode.
 

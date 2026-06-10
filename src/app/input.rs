@@ -3,7 +3,7 @@ use std::io;
 use crossterm::event::{Event, KeyCode, MouseButton, MouseEventKind};
 use ratatui::{Terminal, backend::CrosstermBackend};
 
-use crate::state::{AppState, DashboardTab, SummarySection};
+use crate::state::{AppState, DashboardTab, HeaderAction, SummarySection};
 
 pub(super) fn handle_event(
     ev: Event,
@@ -71,7 +71,12 @@ pub(super) fn handle_event(
 
     if let Event::Mouse(mouse) = &ev {
         match mouse.kind {
-            MouseEventKind::Down(MouseButton::Left) => match state.dashboard_tab {
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let Some(action) = header_action_at(state, mouse.row, mouse.column) {
+                    run_header_action(state, action);
+                    return true;
+                }
+                match state.dashboard_tab {
                 DashboardTab::Tiles => {
                     if let Some(idx) = find_tile_at(state, mouse.row, mouse.column) {
                         state.tile_selected = idx;
@@ -90,7 +95,8 @@ pub(super) fn handle_event(
                         return true;
                     }
                 }
-            },
+                }
+            }
             // Right-click anywhere closes the dashboard — mirrors the
             // tmux right-click that opened it, so it acts as a toggle.
             // (tmux popups are mouse-modal, so the status-bar bind can't
@@ -541,6 +547,80 @@ fn find_tile_at(state: &AppState, row: u16, col: u16) -> Option<usize> {
         t.rect
             .contains(ratatui::layout::Position { x: col, y: row })
     })
+}
+
+// ─── Header item clicks ─────────────────────────────────────────────
+
+fn header_action_at(state: &AppState, row: u16, col: u16) -> Option<HeaderAction> {
+    state
+        .layout
+        .header_targets
+        .iter()
+        .find(|t| {
+            t.rect
+                .contains(ratatui::layout::Position { x: col, y: row })
+        })
+        .map(|t| t.action)
+}
+
+/// Run a header item's action — identical to pressing the matching key,
+/// except `SwitchTab` which flips the view (clicking the tab label or
+/// "Tab: switch").
+fn run_header_action(state: &mut AppState, action: HeaderAction) {
+    match action {
+        HeaderAction::SwitchTab => {
+            state.dashboard_tab = match state.dashboard_tab {
+                DashboardTab::Summary => DashboardTab::Tiles,
+                DashboardTab::Tiles => DashboardTab::Summary,
+            };
+        }
+        HeaderAction::ToggleSort => {
+            state.sort_by_activity = !state.sort_by_activity;
+            state.sort_groups_if_needed();
+        }
+        HeaderAction::ToggleNames => {
+            state.show_technical_names = !state.show_technical_names;
+            crate::tmux::set_global_option(
+                crate::tmux::DASHBOARD_SHOW_TECHNICAL_NAMES,
+                if state.show_technical_names { "1" } else { "0" },
+            );
+        }
+        HeaderAction::ToggleActiveOnly => {
+            state.tiles_hide_idle = !state.tiles_hide_idle;
+            state.tile_selected = 0;
+        }
+        HeaderAction::ToggleFold => {
+            toggle_fold_all(state);
+        }
+        HeaderAction::ClearSelected => {
+            if let Some(pane_id) = selected_pane_id(state) {
+                clear_pane_pending(state, &pane_id);
+            }
+        }
+        HeaderAction::ToggleRedact => {
+            state.privacy_mode = !state.privacy_mode;
+        }
+        HeaderAction::Close => {
+            state.should_exit = true;
+        }
+    }
+}
+
+/// Pane id under the current selection in the active view, for header
+/// actions (like `c: clear`) that operate on the selection.
+fn selected_pane_id(state: &AppState) -> Option<String> {
+    match state.dashboard_tab {
+        DashboardTab::Tiles => state
+            .layout
+            .tile_targets
+            .get(state.tile_selected)
+            .map(|t| t.pane_id.clone()),
+        DashboardTab::Summary => state
+            .layout
+            .summary_targets
+            .get(state.summary_selected)
+            .map(|t| t.pane_id.clone()),
+    }
 }
 
 // ─── Summary tab navigation ─────────────────────────────────────────

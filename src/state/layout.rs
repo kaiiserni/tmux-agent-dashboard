@@ -23,6 +23,30 @@ pub struct FrameLayout {
     pub summary_section_running: SummarySectionRect,
     pub summary_section_marked_unread: SummarySectionRect,
     pub summary_section_idle: SummarySectionRect,
+    /// Clickable header items (title bar of the outer block). Each entry
+    /// is one action keyword and the x-range it occupies on the border row.
+    pub header_targets: Vec<HeaderTarget>,
+}
+
+/// Action triggered by clicking a header item. Mirrors the matching key
+/// in the input handler, except `SwitchTab` (clicking the tab label or
+/// "Tab: switch" flips the view).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeaderAction {
+    SwitchTab,
+    ToggleSort,
+    ToggleNames,
+    ToggleActiveOnly,
+    ToggleFold,
+    ClearSelected,
+    ToggleRedact,
+    Close,
+}
+
+#[derive(Debug, Clone)]
+pub struct HeaderTarget {
+    pub rect: Rect,
+    pub action: HeaderAction,
 }
 
 #[derive(Debug, Clone)]

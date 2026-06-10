@@ -6,7 +6,9 @@ pub mod layout;
 mod refresh;
 
 pub use focus::FocusState;
-pub use layout::{FrameLayout, SummarySectionRect, SummaryTarget, TileTarget};
+pub use layout::{
+    FrameLayout, HeaderAction, HeaderTarget, SummarySectionRect, SummaryTarget, TileTarget,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DashboardTab {

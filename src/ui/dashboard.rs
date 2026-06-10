@@ -33,34 +33,12 @@ fn redact(state: &AppState, s: &str) -> String {
 pub fn draw_dashboard(frame: &mut Frame, state: &mut AppState) {
     let area = frame.area();
 
-    let tab_label = match state.dashboard_tab {
-        DashboardTab::Summary => " Summary ",
-        DashboardTab::Tiles => " Tiles ",
-    };
-    let redacted_marker = if state.privacy_mode {
-        "· REDACTED "
-    } else {
-        ""
-    };
-    let tab_hint = match state.dashboard_tab {
-        DashboardTab::Tiles => "f/z: fold · a: active-only · ",
-        DashboardTab::Summary => "",
-    };
-    let names_hint = if state.show_technical_names {
-        "n: friendly · "
-    } else {
-        "n: technical · "
-    };
+    let (title_spans, header_targets) = build_header(state, area);
+    state.layout.header_targets = header_targets;
+
     let outer = Block::default()
         .borders(Borders::ALL)
-        .title(Span::styled(
-            format!(
-                " Agents Dashboard ·{tab_label}{redacted_marker}· Tab: switch · {tab_hint}{names_hint}c: clear · p: redact · q: close "
-            ),
-            Style::default()
-                .fg(state.theme.accent)
-                .add_modifier(Modifier::BOLD),
-        ))
+        .title(Line::from(title_spans))
         .style(Style::default().fg(state.theme.border_inactive));
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
@@ -69,6 +47,142 @@ pub fn draw_dashboard(frame: &mut Frame, state: &mut AppState) {
         DashboardTab::Summary => draw_summary(frame, state, inner),
         DashboardTab::Tiles => draw_tiles(frame, state, inner),
     }
+}
+
+/// One header segment: either plain chrome (not clickable) or an action
+/// item (clickable, gets a `HeaderTarget`). The label carries an embedded
+/// accent on its key letter so clickable items read as interactive.
+enum HeaderSeg {
+    /// Static text, accent-colored, never clickable (e.g. " Agents
+    /// Dashboard ·", separators).
+    Chrome(String),
+    /// Clickable action. `before`/`after` wrap the key letter so we can
+    /// emphasize just the key (e.g. "" / "n: technical " or "Tab: " /
+    /// "switch"). The whole rendered width becomes the hit-target.
+    Action {
+        text: String,
+        action: crate::state::HeaderAction,
+    },
+}
+
+/// Build the outer block's title as styled spans and the matching set of
+/// clickable `HeaderTarget`s. The title is rendered inside `Block::title`,
+/// which lands on the top border row (`area.y`) starting one cell in
+/// (after the top-left corner). We track the running x so each action's
+/// hit-rect lines up with what's drawn.
+fn build_header(
+    state: &AppState,
+    area: Rect,
+) -> (Vec<Span<'static>>, Vec<crate::state::HeaderTarget>) {
+    use crate::state::HeaderAction;
+
+    let tab_label = match state.dashboard_tab {
+        DashboardTab::Summary => " Summary ",
+        DashboardTab::Tiles => " Tiles ",
+    };
+    let names_label = if state.show_technical_names {
+        "n: friendly "
+    } else {
+        "n: technical "
+    };
+
+    let mut segs: Vec<HeaderSeg> = vec![
+        HeaderSeg::Chrome(" Agents Dashboard ·".to_string()),
+        // The tab label itself switches views on click.
+        HeaderSeg::Action {
+            text: tab_label.to_string(),
+            action: HeaderAction::SwitchTab,
+        },
+    ];
+    if state.privacy_mode {
+        segs.push(HeaderSeg::Chrome("· REDACTED ".to_string()));
+    }
+    segs.push(HeaderSeg::Chrome("· ".to_string()));
+    segs.push(HeaderSeg::Action {
+        text: "Tab: switch ".to_string(),
+        action: HeaderAction::SwitchTab,
+    });
+    segs.push(HeaderSeg::Chrome("· ".to_string()));
+    segs.push(HeaderSeg::Action {
+        text: "s: sort ".to_string(),
+        action: HeaderAction::ToggleSort,
+    });
+    segs.push(HeaderSeg::Chrome("· ".to_string()));
+    if matches!(state.dashboard_tab, DashboardTab::Tiles) {
+        segs.push(HeaderSeg::Action {
+            text: "f/z: fold ".to_string(),
+            action: HeaderAction::ToggleFold,
+        });
+        segs.push(HeaderSeg::Chrome("· ".to_string()));
+        segs.push(HeaderSeg::Action {
+            text: "a: active-only ".to_string(),
+            action: HeaderAction::ToggleActiveOnly,
+        });
+        segs.push(HeaderSeg::Chrome("· ".to_string()));
+    }
+    segs.push(HeaderSeg::Action {
+        text: names_label.to_string(),
+        action: HeaderAction::ToggleNames,
+    });
+    segs.push(HeaderSeg::Chrome("· ".to_string()));
+    segs.push(HeaderSeg::Action {
+        text: "c: clear ".to_string(),
+        action: HeaderAction::ClearSelected,
+    });
+    segs.push(HeaderSeg::Chrome("· ".to_string()));
+    segs.push(HeaderSeg::Action {
+        text: "p: redact ".to_string(),
+        action: HeaderAction::ToggleRedact,
+    });
+    segs.push(HeaderSeg::Chrome("· ".to_string()));
+    segs.push(HeaderSeg::Action {
+        text: "q: close ".to_string(),
+        action: HeaderAction::Close,
+    });
+
+    let accent = Style::default()
+        .fg(state.theme.accent)
+        .add_modifier(Modifier::BOLD);
+    // Clickable items get the same accent plus an underline so they read
+    // as interactive without shouting.
+    let action_style = accent.add_modifier(Modifier::UNDERLINED);
+
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut targets: Vec<crate::state::HeaderTarget> = Vec::new();
+    // Title starts one cell past the top-left border corner.
+    let mut x: u16 = area.x.saturating_add(1);
+    let y = area.y;
+    let max_x = area.x.saturating_add(area.width);
+
+    for seg in segs {
+        match seg {
+            HeaderSeg::Chrome(text) => {
+                let w = super::text::display_width(&text) as u16;
+                spans.push(Span::styled(text, accent));
+                x = x.saturating_add(w);
+            }
+            HeaderSeg::Action { text, action } => {
+                let w = super::text::display_width(&text) as u16;
+                let start = x;
+                let end = start.saturating_add(w).min(max_x);
+                if end > start {
+                    targets.push(crate::state::HeaderTarget {
+                        rect: Rect {
+                            x: start,
+                            y,
+                            width: end - start,
+                            height: 1,
+                        },
+                        action,
+                    });
+                }
+                spans.push(Span::styled(text, action_style));
+                x = x.saturating_add(w);
+            }
+        }
+    }
+
+    (spans, targets)
 }
 
 fn draw_summary(frame: &mut Frame, state: &mut AppState, area: Rect) {
