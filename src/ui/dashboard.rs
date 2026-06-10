@@ -244,34 +244,12 @@ fn needs_attention(status: &PaneStatus, attention: bool) -> bool {
     attention || matches!(status, PaneStatus::Waiting | PaneStatus::Error)
 }
 
-/// Tiles "active-only" filter (toggled with `a`): a pane is hidden only
-/// when it is pure idle — no attention flag, not marked unread.
-fn tile_active(pane: &PaneInfo) -> bool {
-    !matches!(pane.status, PaneStatus::Idle) || pane.attention || pane.marked_unread_at.is_some()
-}
-
-/// Indices into `group.panes` that should be rendered in the Tiles view
-/// under the current filter setting.
-fn visible_pane_indices(group: &crate::group::RepoGroup, hide_idle: bool) -> Vec<usize> {
-    if hide_idle {
-        group
-            .panes
-            .iter()
-            .enumerate()
-            .filter(|(_, (p, _))| tile_active(p))
-            .map(|(i, _)| i)
-            .collect()
-    } else {
-        (0..group.panes.len()).collect()
-    }
-}
-
 /// Priority key for ordering Summary-tab rows: attention-flagged first,
 /// then by status urgency (Waiting > Error > Idle > Running >
 /// Background > Unknown), then most-recent start time first. The Tiles
 /// tab does NOT use this — its group order stays alphabetical so `d`/`u`
 /// navigation is stable.
-fn pane_priority_key(p: &PaneInfo) -> (u8, u8, std::cmp::Reverse<u64>) {
+pub fn pane_priority_key(p: &PaneInfo) -> (u8, u8, std::cmp::Reverse<u64>) {
     let attention = if p.attention { 0 } else { 1 };
     let status = match p.status {
         PaneStatus::Waiting => 0,
@@ -1026,7 +1004,7 @@ fn tile_label(pane: &PaneInfo, info: &crate::group::PaneGitInfo, state: &AppStat
 }
 
 const TILE_TARGET_W: u16 = 38;
-const TILE_H: u16 = 6;
+const TILE_H: u16 = 7;
 const TILE_GAP_V: u16 = 1;
 const GROUP_HEADER_H: u16 = 1;
 const GROUP_SPACER_H: u16 = 1;
@@ -1060,7 +1038,7 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let any_visible = state
         .repo_groups
         .iter()
-        .any(|g| !visible_pane_indices(g, hide_idle).is_empty());
+        .any(|g| g.has_visible_panes(hide_idle));
     if !any_visible {
         let msg = if hide_idle {
             "  no active agents (press `a` to show idle)"
@@ -1086,7 +1064,7 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let mut row_base: usize = 0;
     let mut total_tiles: usize = 0;
     for (idx, group) in state.repo_groups.iter().enumerate() {
-        let visible = visible_pane_indices(group, hide_idle);
+        let visible = group.visible_pane_indices(hide_idle);
         if visible.is_empty() {
             continue;
         }
@@ -1132,7 +1110,7 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
             if b.folded {
                 continue;
             }
-            let panes = visible_pane_indices(&state.repo_groups[b.group_idx], hide_idle).len();
+            let panes = state.repo_groups[b.group_idx].visible_pane_count(hide_idle);
             if state.tile_selected < seen + panes {
                 let local = state.tile_selected - seen;
                 let r = (local / cols) as i32;
@@ -1167,7 +1145,7 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
         let header_y = vp_top + b.virtual_y - scroll;
         if header_y >= vp_top && header_y < vp_bottom {
             let group_name = friendly_group_name(&state.repo_groups[group_idx], state);
-            let visible_for_header = visible_pane_indices(&state.repo_groups[group_idx], hide_idle);
+            let visible_for_header = state.repo_groups[group_idx].visible_pane_indices(hide_idle);
             let count = visible_for_header.len();
             let attention = visible_for_header
                 .iter()
@@ -1214,7 +1192,7 @@ fn draw_group_tiles(
     hide_idle: bool,
 ) {
     let cols = col_constraints.len();
-    let visible_idx = visible_pane_indices(&state.repo_groups[group_idx], hide_idle);
+    let visible_idx = state.repo_groups[group_idx].visible_pane_indices(hide_idle);
     let vp_top = area.y as i32;
     let vp_bottom = vp_top + area.height as i32;
 
@@ -1370,6 +1348,36 @@ fn draw_tile(
         truncate_to_width(&prompt, width),
         Style::default().fg(state.theme.text_active),
     )));
+
+    // Context preview: latest activity-log entry (tool + label + age),
+    // in the recent-activity feed's style. Omitted when no activity.
+    if let Some(entry) = state.last_activity.get(&pane.pane_id) {
+        let tool_color = ratatui::style::Color::Indexed(entry.tool_color_index());
+        let age = crate::activity::log_mtime(&pane.pane_id)
+            .and_then(crate::time::compact_ago)
+            .filter(|_| !state.privacy_mode);
+        let tool = truncate_to_width(&entry.tool, 12);
+        let tool_w = super::text::display_width(&tool);
+        let age_w = age.as_deref().map(super::text::display_width).unwrap_or(0);
+        // tool + 1 gap + label, with age right-aligned (1 gap before it).
+        let label_room = width
+            .saturating_sub(tool_w + 1 + if age_w > 0 { age_w + 1 } else { 0 });
+        let label = redact(state, &truncate_to_width(&entry.label, label_room));
+        let mut preview: Vec<Span> = vec![
+            Span::styled(tool, Style::default().fg(tool_color)),
+            Span::raw(" "),
+            Span::styled(label.clone(), Style::default().fg(state.theme.text_muted)),
+        ];
+        if let Some(age) = age {
+            let used = tool_w + 1 + super::text::display_width(&label);
+            let pad = width.saturating_sub(used + age_w);
+            if pad > 0 {
+                preview.push(Span::raw(" ".repeat(pad)));
+            }
+            preview.push(Span::styled(age, Style::default().fg(state.theme.text_muted)));
+        }
+        lines.push(Line::from(preview));
+    }
 
     let badge = pane.permission_mode.badge();
     let mut footer: Vec<Span> = vec![Span::styled(

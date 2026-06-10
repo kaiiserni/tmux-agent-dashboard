@@ -51,8 +51,13 @@ run-shell '~/projects/tmux-agent-dashboard/tmux-agent-dashboard.tmux'
 | `g` / `G` | Jump to first / last row (Summary) |
 | `PageDown` / `PageUp` | Scroll the active list |
 | `Enter` or click | Activate pane and close popup |
+| `Space` | Jump to the top pane that needs attention and close popup |
+| `L` | Jump back to the origin pane (toggles back on a second press) |
 | Mouse wheel | Scroll the list under the cursor |
 | `q` / `Esc` | Close popup |
+
+Each tile in the Tiles view also shows a context-preview line: the pane's
+most recent activity-log entry (tool, label, and age). Hidden in redact mode.
 
 ## Configuration
 

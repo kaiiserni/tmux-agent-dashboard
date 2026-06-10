@@ -79,6 +79,9 @@ pub struct AppState {
     /// Last time `session_names` was rescanned. The scan reruns at most
     /// once every 10 seconds.
     pub session_names_refreshed_at: Option<std::time::Instant>,
+    /// Per-refresh lookup of each pane's most recent activity-log entry,
+    /// keyed by pane id. Drives the per-tile context-preview line.
+    pub last_activity: std::collections::HashMap<String, crate::activity::ActivityEntry>,
 }
 
 impl AppState {
@@ -114,6 +117,7 @@ impl AppState {
             git_cache: crate::group::GitInfoCache::new(),
             session_names: std::collections::HashMap::new(),
             session_names_refreshed_at: None,
+            last_activity: std::collections::HashMap::new(),
         }
     }
 }

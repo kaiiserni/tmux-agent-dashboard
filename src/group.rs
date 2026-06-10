@@ -3,7 +3,13 @@ use std::time::{Duration, Instant};
 
 use indexmap::IndexMap;
 
-use crate::tmux::PaneInfo;
+use crate::tmux::{PaneInfo, PaneStatus};
+
+/// A pane is "visible" under the Tiles hide-idle filter unless it is pure
+/// idle: not running, not flagged for attention, not marked unread.
+pub fn pane_is_visible(pane: &PaneInfo) -> bool {
+    !matches!(pane.status, PaneStatus::Idle) || pane.attention || pane.marked_unread_at.is_some()
+}
 
 /// Max age before a cached `PaneGitInfo` entry is re-resolved.
 /// Refresh fires every second; without this the dashboard would shell out
@@ -34,6 +40,41 @@ pub struct RepoGroup {
     pub name: String,
     pub has_focus: bool,
     pub panes: Vec<(PaneInfo, PaneGitInfo)>,
+}
+
+impl RepoGroup {
+    /// Indices into `panes` rendered in the Tiles view under the current
+    /// filter. With `hide_idle`, pure-idle panes are dropped.
+    pub fn visible_pane_indices(&self, hide_idle: bool) -> Vec<usize> {
+        if hide_idle {
+            self.panes
+                .iter()
+                .enumerate()
+                .filter(|(_, (p, _))| pane_is_visible(p))
+                .map(|(i, _)| i)
+                .collect()
+        } else {
+            (0..self.panes.len()).collect()
+        }
+    }
+
+    /// Number of panes the Tiles view shows for this group.
+    pub fn visible_pane_count(&self, hide_idle: bool) -> usize {
+        if hide_idle {
+            self.panes.iter().filter(|(p, _)| pane_is_visible(p)).count()
+        } else {
+            self.panes.len()
+        }
+    }
+
+    /// Whether this group has any pane the Tiles view would show.
+    pub fn has_visible_panes(&self, hide_idle: bool) -> bool {
+        if hide_idle {
+            self.panes.iter().any(|(p, _)| pane_is_visible(p))
+        } else {
+            !self.panes.is_empty()
+        }
+    }
 }
 
 /// Single git call for branch + repo root.

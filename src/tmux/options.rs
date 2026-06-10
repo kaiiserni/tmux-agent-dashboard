@@ -43,6 +43,11 @@ pub const PANE_WORKTREE_NAME: &str = "@pane_worktree_name";
 /// restart.
 pub const DASHBOARD_SHOW_TECHNICAL_NAMES: &str = "@dashboard_show_technical_names";
 
+/// Pane id the user was on when the popup last opened. Written on every
+/// dashboard-initiated jump (Enter / click / Space) so the `L` key can
+/// hop back to it. Survives binary restart as a tmux global option.
+pub const DASHBOARD_JUMP_ORIGIN: &str = "@dashboard_jump_origin";
+
 /// Stored in `@pane_bg_cmd` when the background Bash invocation arrives
 /// without a command string we can echo back to the user.
 pub const BG_CMD_PLACEHOLDER: &str = "(background shell)";

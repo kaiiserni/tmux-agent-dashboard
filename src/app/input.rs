@@ -42,6 +42,19 @@ pub(super) fn handle_event(
                 );
                 return true;
             }
+            // Space: jump straight to the top-attention pane (both views).
+            KeyCode::Char(' ') => {
+                if let Some(pane_id) = top_attention_pane(state) {
+                    jump_to_pane(state, &pane_id);
+                }
+                return true;
+            }
+            // `L`: hop back to the origin pane (the one active when the
+            // popup opened, or wherever the previous jump came from).
+            KeyCode::Char('L') => {
+                jump_back(state);
+                return true;
+            }
             _ => {}
         }
 
@@ -63,8 +76,7 @@ pub(super) fn handle_event(
                     if let Some(idx) = find_tile_at(state, mouse.row, mouse.column) {
                         state.tile_selected = idx;
                         if let Some(target) = state.layout.tile_targets.get(idx).cloned() {
-                            state.activate_pane_by_id(&target.pane_id);
-                            state.should_exit = true;
+                            jump_to_pane(state, &target.pane_id);
                         }
                         return true;
                     }
@@ -73,8 +85,7 @@ pub(super) fn handle_event(
                     if let Some(idx) = find_summary_at(state, mouse.row, mouse.column) {
                         state.summary_selected = idx;
                         if let Some(target) = state.layout.summary_targets.get(idx).cloned() {
-                            state.activate_pane_by_id(&target.pane_id);
-                            state.should_exit = true;
+                            jump_to_pane(state, &target.pane_id);
                         }
                         return true;
                     }
@@ -285,13 +296,64 @@ fn handle_dashboard_tiles_key(state: &mut AppState, code: KeyCode) -> bool {
         }
         KeyCode::Enter => {
             if let Some(target) = state.layout.tile_targets.get(cur).cloned() {
-                state.activate_pane_by_id(&target.pane_id);
-                state.should_exit = true;
+                jump_to_pane(state, &target.pane_id);
             }
             true
         }
         _ => false,
     }
+}
+
+/// Activate a pane the user picked (Enter / click / Space) and close the
+/// popup. Records the popup's origin pane in `@dashboard_jump_origin`
+/// first so `L` can hop back to it.
+fn jump_to_pane(state: &mut AppState, pane_id: &str) {
+    if !state.tmux_pane.is_empty() {
+        crate::tmux::set_global_option(crate::tmux::DASHBOARD_JUMP_ORIGIN, &state.tmux_pane);
+    }
+    state.activate_pane_by_id(pane_id);
+    state.should_exit = true;
+}
+
+/// `L`: jump back to the recorded origin pane. Swaps the stored origin
+/// with the current one so a second `L` (after reopening the popup)
+/// toggles back — "return to where I was before my last jump". No-op if
+/// the origin is unset or its pane no longer exists.
+fn jump_back(state: &mut AppState) {
+    let origin = match crate::tmux::get_option(crate::tmux::DASHBOARD_JUMP_ORIGIN) {
+        Some(o) if !o.is_empty() => o,
+        _ => return,
+    };
+    if !crate::tmux::pane_exists(&origin) {
+        return;
+    }
+    if !state.tmux_pane.is_empty() {
+        crate::tmux::set_global_option(crate::tmux::DASHBOARD_JUMP_ORIGIN, &state.tmux_pane);
+    }
+    state.activate_pane_by_id(&origin);
+    state.should_exit = true;
+}
+
+/// Highest-priority pane that needs attention, using the same ordering as
+/// the Summary tab (attention-flagged first, then Waiting/Error, oldest
+/// first on ties). `None` when nothing needs attention.
+fn top_attention_pane(state: &AppState) -> Option<String> {
+    state
+        .repo_groups
+        .iter()
+        .flat_map(|g| g.panes.iter())
+        .filter(|(p, _)| {
+            p.attention
+                || matches!(
+                    p.status,
+                    crate::tmux::PaneStatus::Waiting | crate::tmux::PaneStatus::Error
+                )
+        })
+        .min_by(|a, b| {
+            crate::ui::dashboard::pane_priority_key(&a.0)
+                .cmp(&crate::ui::dashboard::pane_priority_key(&b.0))
+        })
+        .map(|(p, _)| p.pane_id.clone())
 }
 
 fn nearest_in_direction(
@@ -369,27 +431,16 @@ fn toggle_fold_current(state: &mut AppState, _cur: usize) {
 /// done once in `setup::init_state`, not on every refresh.
 pub fn ensure_expanded_group(state: &mut AppState) {
     let hide_idle = state.tiles_hide_idle;
-    let has_visible = |g: &crate::group::RepoGroup| {
-        if hide_idle {
-            g.panes.iter().any(|(p, _)| {
-                !matches!(p.status, crate::tmux::PaneStatus::Idle)
-                    || p.attention
-                    || p.marked_unread_at.is_some()
-            })
-        } else {
-            !g.panes.is_empty()
-        }
-    };
     if let Some(key) = state.expanded_group.clone() {
         let valid = state
             .repo_groups
             .iter()
-            .any(|g| g.key == key && has_visible(g));
+            .any(|g| g.key == key && g.has_visible_panes(hide_idle));
         if !valid {
             state.expanded_group = state
                 .repo_groups
                 .iter()
-                .find(|g| has_visible(g))
+                .find(|g| g.has_visible_panes(hide_idle))
                 .map(|g| g.key.clone());
         }
     }
@@ -434,24 +485,28 @@ fn switch_to_group(state: &mut AppState, g_idx: usize, to_last: bool) {
     if g_idx >= state.repo_groups.len() {
         return;
     }
+    let hide_idle = state.tiles_hide_idle;
     let group = &state.repo_groups[g_idx];
-    if group.panes.is_empty() {
+    let visible_count = group.visible_pane_count(hide_idle);
+    if visible_count == 0 {
         return;
     }
     state.expanded_group = Some(group.key.clone());
     state.expand_all_groups = false;
-    state.tile_selected = if to_last { group.panes.len() - 1 } else { 0 };
+    state.tile_selected = if to_last { visible_count - 1 } else { 0 };
     // Reset scroll so the new group is visible at the top.
     state.tile_scroll_group = g_idx;
 }
 
 fn next_nonempty_group(state: &AppState, from: usize, forward: bool) -> Option<usize> {
+    let hide_idle = state.tiles_hide_idle;
     if forward {
-        ((from + 1)..state.repo_groups.len()).find(|&i| !state.repo_groups[i].panes.is_empty())
+        ((from + 1)..state.repo_groups.len())
+            .find(|&i| state.repo_groups[i].has_visible_panes(hide_idle))
     } else {
         (0..from)
             .rev()
-            .find(|&i| !state.repo_groups[i].panes.is_empty())
+            .find(|&i| state.repo_groups[i].has_visible_panes(hide_idle))
     }
 }
 
@@ -595,8 +650,7 @@ fn handle_dashboard_summary_key(state: &mut AppState, code: KeyCode) -> bool {
         }
         KeyCode::Enter => {
             if let Some(target) = state.layout.summary_targets.get(cur).cloned() {
-                state.activate_pane_by_id(&target.pane_id);
-                state.should_exit = true;
+                jump_to_pane(state, &target.pane_id);
             }
             true
         }

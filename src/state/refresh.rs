@@ -18,7 +18,23 @@ impl AppState {
         self.refresh_session_names();
         self.apply_session_names();
         crate::pending::sweep_stale_marks(&mut self.repo_groups);
+        self.refresh_last_activity();
         self.sort_groups_if_needed();
+    }
+
+    /// Rebuild the pane_id → latest-activity-entry lookup for the tile
+    /// context-preview line. One log read per visible pane per refresh.
+    fn refresh_last_activity(&mut self) {
+        self.last_activity.clear();
+        for group in &self.repo_groups {
+            for (pane, _) in &group.panes {
+                if let Some(entry) =
+                    crate::activity::read_activity_log(&pane.pane_id, 1).into_iter().next()
+                {
+                    self.last_activity.insert(pane.pane_id.clone(), entry);
+                }
+            }
+        }
     }
 
     /// Self-heal panes left on `background` after their `run_in_background`

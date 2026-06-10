@@ -43,6 +43,12 @@ pub fn get_pane_option_value(pane_id: &str, key: &str) -> String {
         .unwrap_or_default()
 }
 
+/// True if `pane_id` still refers to a live pane. `display-message -t`
+/// fails (non-zero) when the target is gone.
+pub fn pane_exists(pane_id: &str) -> bool {
+    display_message(pane_id, "#{pane_id}") == pane_id
+}
+
 pub fn set_global_option(key: &str, value: &str) {
     let _ = run_tmux(&["set", "-g", key, value]);
 }

@@ -98,7 +98,7 @@ fn decode_pane_id_from_log(filename: &str) -> Option<String> {
     if stem.is_empty() {
         return None;
     }
-    Some(stem.replacen('_', "%", 1))
+    Some(stem.replace('_', "%"))
 }
 
 /// Merge activity entries from every `/tmp/tmux-agent-activity*.log` file.
@@ -135,6 +135,7 @@ pub fn read_all_activity(max_entries: usize) -> Vec<GlobalActivityEntry> {
 
     per_file.sort_by(|a, b| b.0.cmp(&a.0));
 
+    let unlimited = max_entries == 0;
     let mut merged: Vec<GlobalActivityEntry> = Vec::new();
     for (mtime, pane_id, entries) in per_file {
         for entry in entries {
@@ -143,13 +144,27 @@ pub fn read_all_activity(max_entries: usize) -> Vec<GlobalActivityEntry> {
                 entry,
                 mtime,
             });
-            if merged.len() >= max_entries {
+            if !unlimited && merged.len() >= max_entries {
                 break;
             }
         }
-        if merged.len() >= max_entries {
+        if !unlimited && merged.len() >= max_entries {
             break;
         }
     }
     merged
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pane_id_log_round_trip() {
+        for id in ["%1", "%42", "%0"] {
+            let path = log_file_path(id);
+            let name = path.file_name().unwrap().to_str().unwrap();
+            assert_eq!(decode_pane_id_from_log(name).as_deref(), Some(id));
+        }
+    }
 }

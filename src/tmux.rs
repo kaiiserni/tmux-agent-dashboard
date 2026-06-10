@@ -4,11 +4,12 @@ mod query;
 pub mod types;
 
 pub use commands::{
-    display_message, get_all_global_options, get_pane_option_value, run_tmux, select_pane,
-    set_global_option, set_pane_option, unset_pane_option,
+    display_message, get_all_global_options, get_pane_option_value, pane_exists, run_tmux,
+    select_pane, set_global_option, set_pane_option, unset_pane_option,
 };
 pub use options::{
-    BG_CMD_PLACEHOLDER, DASHBOARD_SHOW_TECHNICAL_NAMES, PANE_AGENT, PANE_ATTENTION, PANE_BG_CMD,
+    BG_CMD_PLACEHOLDER, DASHBOARD_JUMP_ORIGIN, DASHBOARD_SHOW_TECHNICAL_NAMES, PANE_AGENT,
+    PANE_ATTENTION, PANE_BG_CMD,
     PANE_CWD, PANE_LAST_SEEN_AT, PANE_MARKED_UNREAD_AT, PANE_NAME, PANE_PERMISSION_MODE,
     PANE_PROMPT, PANE_PROMPT_SOURCE, PANE_ROLE, PANE_SESSION_ID, PANE_STARTED_AT, PANE_STATUS,
     PANE_SUBAGENTS, PANE_WAIT_REASON, PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME,

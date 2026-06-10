@@ -266,7 +266,7 @@ impl EventAdapter for AntigravityAdapter {
                 if tool_name.is_empty() {
                     return None;
                 }
-                let tool_input = tool_call.get("args").cloned().unwrap_or(Value::Null);
+                let tool_input = parse_json_field(tool_call, "args");
                 Some(AgentEvent::ActivityLog {
                     tool_name: tool_name.into(),
                     tool_input,
