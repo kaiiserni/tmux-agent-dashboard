@@ -42,6 +42,14 @@ pub(super) fn handle_event(
                 );
                 return true;
             }
+            KeyCode::Char('o') => {
+                state.responded_newest_first = !state.responded_newest_first;
+                crate::tmux::set_global_option(
+                    crate::tmux::DASHBOARD_RESPONDED_NEWEST_FIRST,
+                    if state.responded_newest_first { "1" } else { "0" },
+                );
+                return true;
+            }
             // Space: jump straight to the top-attention pane (both views).
             KeyCode::Char(' ') => {
                 if let Some(pane_id) = top_attention_pane(state) {
@@ -583,6 +591,13 @@ fn run_header_action(state: &mut AppState, action: HeaderAction) {
             crate::tmux::set_global_option(
                 crate::tmux::DASHBOARD_SHOW_TECHNICAL_NAMES,
                 if state.show_technical_names { "1" } else { "0" },
+            );
+        }
+        HeaderAction::ToggleRespondedOrder => {
+            state.responded_newest_first = !state.responded_newest_first;
+            crate::tmux::set_global_option(
+                crate::tmux::DASHBOARD_RESPONDED_NEWEST_FIRST,
+                if state.responded_newest_first { "1" } else { "0" },
             );
         }
         HeaderAction::ToggleActiveOnly => {

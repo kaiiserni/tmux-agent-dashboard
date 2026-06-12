@@ -43,6 +43,12 @@ pub const PANE_WORKTREE_NAME: &str = "@pane_worktree_name";
 /// restart.
 pub const DASHBOARD_SHOW_TECHNICAL_NAMES: &str = "@dashboard_show_technical_names";
 
+/// When `1`, the Responded summary section is sorted newest-first
+/// instead of the default oldest-first review-queue order. Toggled via
+/// the `o` key. Persisted as a tmux global option so it survives binary
+/// restart.
+pub const DASHBOARD_RESPONDED_NEWEST_FIRST: &str = "@dashboard_responded_newest_first";
+
 /// Pane id the user was on when the popup last opened. Written on every
 /// dashboard-initiated jump (Enter / click / Space) so the `L` key can
 /// hop back to it. Survives binary restart as a tmux global option.

@@ -36,6 +36,7 @@ pub enum HeaderAction {
     SwitchTab,
     ToggleSort,
     ToggleNames,
+    ToggleRespondedOrder,
     ToggleActiveOnly,
     ToggleFold,
     ClearSelected,

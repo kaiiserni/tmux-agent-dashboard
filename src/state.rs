@@ -70,6 +70,11 @@ pub struct AppState {
     /// of whether `@pane_name` is set. Loaded from / persisted to the
     /// tmux global option `@dashboard_show_technical_names`.
     pub show_technical_names: bool,
+    /// When `true`, the Responded section is sorted newest-first instead
+    /// of the default oldest-first review-queue order. Loaded from /
+    /// persisted to the tmux global option
+    /// `@dashboard_responded_newest_first`.
+    pub responded_newest_first: bool,
     /// Set by `q` / `Esc` handlers to break out of the event loop cleanly.
     pub should_exit: bool,
     /// Cross-refresh cache of resolved git info per pane path. Keeps
@@ -112,6 +117,11 @@ impl AppState {
             privacy_mode: false,
             show_technical_names: crate::tmux::get_option(
                 crate::tmux::DASHBOARD_SHOW_TECHNICAL_NAMES,
+            )
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false),
+            responded_newest_first: crate::tmux::get_option(
+                crate::tmux::DASHBOARD_RESPONDED_NEWEST_FIRST,
             )
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false),

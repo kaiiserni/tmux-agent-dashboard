@@ -85,6 +85,11 @@ fn build_header(
     } else {
         "n: technical "
     };
+    let order_label = if state.responded_newest_first {
+        "o: oldest "
+    } else {
+        "o: newest "
+    };
 
     let mut segs: Vec<HeaderSeg> = vec![
         HeaderSeg::Chrome(" Agents Dashboard ·".to_string()),
@@ -123,6 +128,11 @@ fn build_header(
     segs.push(HeaderSeg::Action {
         text: names_label.to_string(),
         action: HeaderAction::ToggleNames,
+    });
+    segs.push(HeaderSeg::Chrome("· ".to_string()));
+    segs.push(HeaderSeg::Action {
+        text: order_label.to_string(),
+        action: HeaderAction::ToggleRespondedOrder,
     });
     segs.push(HeaderSeg::Chrome("· ".to_string()));
     segs.push(HeaderSeg::Action {
@@ -871,8 +881,13 @@ fn draw_responded(frame: &mut Frame, state: &mut AppState, area: Rect) {
         })
         .collect();
 
-    // Oldest first: Responded is a review queue, top = next to handle.
-    rows.sort_by(|a, b| a.1.cmp(&b.1));
+    // Default oldest-first: Responded is a review queue, top = next to
+    // handle. `o` flips to newest-first for a freshest-on-top view.
+    if state.responded_newest_first {
+        rows.sort_by(|a, b| b.1.cmp(&a.1));
+    } else {
+        rows.sort_by(|a, b| a.1.cmp(&b.1));
+    }
     let rows: Vec<SummaryRow> = rows.into_iter().map(|(r, _)| r).collect();
 
     if rows.is_empty() {
