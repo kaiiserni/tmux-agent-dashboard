@@ -15,9 +15,11 @@ use crate::state::{AppState, OverviewTarget};
 use super::text::display_width;
 
 /// One rendered row plus the pane it jumps to when clicked (if any).
+/// `link` is (pane_id, "session:window.pane") — the target string backs
+/// up the pane id when the snapshot has gone stale.
 struct Row {
     line: Line<'static>,
-    pane_id: Option<String>,
+    link: Option<(String, String)>,
 }
 
 fn redact(state: &AppState, s: &str) -> String {
@@ -94,7 +96,7 @@ pub fn draw_overview(frame: &mut Frame, state: &mut AppState, area: Rect) {
 
     // Register click targets for the visible pane rows.
     for (offset, row) in rows.iter().skip(scroll).take(area.height as usize).enumerate() {
-        if let Some(pane_id) = &row.pane_id {
+        if let Some((pane_id, target)) = &row.link {
             state.layout.overview_targets.push(OverviewTarget {
                 rect: Rect {
                     x: area.x,
@@ -103,6 +105,7 @@ pub fn draw_overview(frame: &mut Frame, state: &mut AppState, area: Rect) {
                     height: 1,
                 },
                 pane_id: pane_id.clone(),
+                target: target.clone(),
             });
         }
     }
@@ -119,13 +122,13 @@ fn build_rows(state: &AppState, overview: &Overview, width: usize) -> Vec<Row> {
         .add_modifier(Modifier::BOLD);
 
     fn push(rows: &mut Vec<Row>, line: Line<'static>) {
-        rows.push(Row { line, pane_id: None });
+        rows.push(Row { line, link: None });
     }
 
     /// Push a row that jumps to `link` when clicked (project block lines
     /// link through to the project's most relevant pane).
-    fn push_link(rows: &mut Vec<Row>, line: Line<'static>, link: &Option<String>) {
-        rows.push(Row { line, pane_id: link.clone() });
+    fn push_link(rows: &mut Vec<Row>, line: Line<'static>, link: &Option<(String, String)>) {
+        rows.push(Row { line, link: link.clone() });
     }
 
     // ── Status line ──────────────────────────────────────────────────
@@ -163,12 +166,12 @@ fn build_rows(state: &AppState, overview: &Overview, width: usize) -> Vec<Row> {
     for project in &overview.projects {
         // Whole-block click target: prefer a waiting/error pane, else the
         // first one.
-        let link: Option<String> = project
+        let link: Option<(String, String)> = project
             .panes
             .iter()
             .find(|p| matches!(p.status.as_str(), "waiting" | "error"))
             .or_else(|| project.panes.first())
-            .map(|p| p.pane_id.clone());
+            .map(|p| (p.pane_id.clone(), p.target.clone()));
         let head_color = if project.attention {
             state.theme.status_waiting
         } else {
@@ -210,13 +213,13 @@ fn build_rows(state: &AppState, overview: &Overview, width: usize) -> Vec<Row> {
             ]);
             rows.push(Row {
                 line,
-                pane_id: Some(pane.pane_id.clone()),
+                link: Some((pane.pane_id.clone(), pane.target.clone())),
             });
             if !pane.summary.is_empty() {
                 for part in wrap(&redact(state, &pane.summary), width.saturating_sub(6)) {
                     rows.push(Row {
                         line: Line::from(Span::styled(format!("      {part}"), muted)),
-                        pane_id: Some(pane.pane_id.clone()),
+                        link: Some((pane.pane_id.clone(), pane.target.clone())),
                     });
                 }
             }
@@ -275,7 +278,7 @@ fn build_rows(state: &AppState, overview: &Overview, width: usize) -> Vec<Row> {
                 format!("Idle ({})", overview.idle.len()),
                 title_style,
             )),
-            pane_id: None,
+            link: None,
         });
         for pane in &overview.idle {
             let task = redact(state, &pane.task);
@@ -293,7 +296,7 @@ fn build_rows(state: &AppState, overview: &Overview, width: usize) -> Vec<Row> {
             ]);
             rows.push(Row {
                 line,
-                pane_id: Some(pane.pane_id.clone()),
+                link: Some((pane.pane_id.clone(), pane.target.clone())),
             });
         }
     }

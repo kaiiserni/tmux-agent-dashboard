@@ -49,6 +49,24 @@ pub fn pane_exists(pane_id: &str) -> bool {
     display_message(pane_id, "#{pane_id}") == pane_id
 }
 
+/// Best-effort jump to a `session:window.pane` string when the pane id
+/// itself is gone: switch to the session, then try the window. Returns
+/// `false` when even the session no longer exists.
+pub fn select_session_window(target: &str) -> bool {
+    let (session, rest) = match target.split_once(':') {
+        Some(parts) => parts,
+        None => (target, ""),
+    };
+    if session.is_empty() || run_tmux(&["switch-client", "-t", session]).is_none() {
+        return false;
+    }
+    let window = rest.split('.').next().unwrap_or("");
+    if !window.is_empty() {
+        let _ = run_tmux(&["select-window", "-t", &format!("{session}:{window}")]);
+    }
+    true
+}
+
 pub fn set_global_option(key: &str, value: &str) {
     let _ = run_tmux(&["set", "-g", key, value]);
 }

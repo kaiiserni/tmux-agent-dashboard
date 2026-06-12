@@ -106,8 +106,8 @@ pub(super) fn handle_event(
                     }
                 }
                 DashboardTab::Overview => {
-                    if let Some(pane_id) = find_overview_pane_at(state, mouse.row, mouse.column) {
-                        jump_to_pane(state, &pane_id);
+                    if let Some((pane_id, target)) = find_overview_pane_at(state, mouse.row, mouse.column) {
+                        jump_to_overview_target(state, &pane_id, &target);
                         return true;
                     }
                 }
@@ -868,7 +868,7 @@ fn find_summary_at(state: &AppState, row: u16, col: u16) -> Option<usize> {
 
 // ─── Overview tab ────────────────────────────────────────────────────
 
-fn find_overview_pane_at(state: &AppState, row: u16, col: u16) -> Option<String> {
+fn find_overview_pane_at(state: &AppState, row: u16, col: u16) -> Option<(String, String)> {
     state
         .layout
         .overview_targets
@@ -877,7 +877,23 @@ fn find_overview_pane_at(state: &AppState, row: u16, col: u16) -> Option<String>
             t.rect
                 .contains(ratatui::layout::Position { x: col, y: row })
         })
-        .map(|t| t.pane_id.clone())
+        .map(|t| (t.pane_id.clone(), t.target.clone()))
+}
+
+/// Overview rows come from a snapshot that can be minutes old: jump to
+/// the pane when it still exists, otherwise fall back to the snapshot's
+/// `session:window` (and stay open if even the session is gone).
+fn jump_to_overview_target(state: &mut AppState, pane_id: &str, target: &str) {
+    if crate::tmux::pane_exists(pane_id) {
+        jump_to_pane(state, pane_id);
+        return;
+    }
+    if crate::tmux::select_session_window(target) {
+        if !state.tmux_pane.is_empty() {
+            crate::tmux::set_global_option(crate::tmux::DASHBOARD_JUMP_ORIGIN, &state.tmux_pane);
+        }
+        state.should_exit = true;
+    }
 }
 
 fn scroll_overview(state: &mut AppState, delta: isize) {

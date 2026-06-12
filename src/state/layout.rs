@@ -38,6 +38,9 @@ pub struct FrameLayout {
 pub struct OverviewTarget {
     pub rect: Rect,
     pub pane_id: String,
+    /// `session:window.pane` from the overview snapshot — fallback when
+    /// the pane id has died since the snapshot was taken.
+    pub target: String,
 }
 
 /// Action triggered by clicking a header item. Mirrors the matching key
