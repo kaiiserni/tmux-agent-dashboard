@@ -18,6 +18,33 @@ pub enum DashboardTab {
     Overview,
 }
 
+impl DashboardTab {
+    pub fn label(self) -> &'static str {
+        match self {
+            DashboardTab::Summary => "summary",
+            DashboardTab::Tiles => "tiles",
+            DashboardTab::Overview => "overview",
+        }
+    }
+
+    pub fn from_label(label: &str) -> Option<Self> {
+        match label {
+            "summary" => Some(DashboardTab::Summary),
+            "tiles" => Some(DashboardTab::Tiles),
+            "overview" => Some(DashboardTab::Overview),
+            _ => None,
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            DashboardTab::Summary => DashboardTab::Tiles,
+            DashboardTab::Tiles => DashboardTab::Overview,
+            DashboardTab::Overview => DashboardTab::Summary,
+        }
+    }
+}
+
 /// Identifies a scrollable list section in the dashboard summary view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SummarySection {
@@ -108,7 +135,9 @@ impl AppState {
             tmux_pane,
             theme: ColorTheme::default(),
             icons: StatusIcons::default(),
-            dashboard_tab: DashboardTab::Summary,
+            dashboard_tab: crate::tmux::get_option(crate::tmux::DASHBOARD_LAST_TAB)
+                .and_then(|v| DashboardTab::from_label(&v))
+                .unwrap_or(DashboardTab::Summary),
             tile_selected: 0,
             tile_scroll_group: 0,
             expanded_group: None,

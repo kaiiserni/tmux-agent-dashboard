@@ -122,6 +122,12 @@ fn build_rows(state: &AppState, overview: &Overview, width: usize) -> Vec<Row> {
         rows.push(Row { line, pane_id: None });
     }
 
+    /// Push a row that jumps to `link` when clicked (project block lines
+    /// link through to the project's most relevant pane).
+    fn push_link(rows: &mut Vec<Row>, line: Line<'static>, link: &Option<String>) {
+        rows.push(Row { line, pane_id: link.clone() });
+    }
+
     // ── Status line ──────────────────────────────────────────────────
     let ago = crate::time::compact_ago(overview.updated_at).unwrap_or_else(|| "?".into());
     let active_panes: usize = overview.projects.iter().map(|p| p.panes.len()).sum();
@@ -155,6 +161,14 @@ fn build_rows(state: &AppState, overview: &Overview, width: usize) -> Vec<Row> {
 
     // ── Projects ─────────────────────────────────────────────────────
     for project in &overview.projects {
+        // Whole-block click target: prefer a waiting/error pane, else the
+        // first one.
+        let link: Option<String> = project
+            .panes
+            .iter()
+            .find(|p| matches!(p.status.as_str(), "waiting" | "error"))
+            .or_else(|| project.panes.first())
+            .map(|p| p.pane_id.clone());
         let head_color = if project.attention {
             state.theme.status_waiting
         } else {
@@ -170,7 +184,7 @@ fn build_rows(state: &AppState, overview: &Overview, width: usize) -> Vec<Row> {
                 Style::default().fg(state.theme.status_waiting),
             ));
         }
-        push(&mut rows, Line::from(head));
+        push_link(&mut rows, Line::from(head), &link);
 
         for pane in &project.panes {
             let age = pane
@@ -210,7 +224,7 @@ fn build_rows(state: &AppState, overview: &Overview, width: usize) -> Vec<Row> {
 
         if !project.doing.is_empty() {
             for part in wrap(&redact(state, &project.doing), width.saturating_sub(2)) {
-                push(&mut rows, Line::from(Span::styled(format!("  {part}"), muted)));
+                push_link(&mut rows, Line::from(Span::styled(format!("  {part}"), muted)), &link);
             }
         }
         if !project.needs_from_you.is_empty() && project.needs_from_you != "null" {
@@ -220,7 +234,7 @@ fn build_rows(state: &AppState, overview: &Overview, width: usize) -> Vec<Row> {
             );
             for (i, part) in wrapped.into_iter().enumerate() {
                 let prefix = if i == 0 { "  ⚠ Needs you: " } else { "    " };
-                push(&mut rows, Line::from(vec![
+                push_link(&mut rows, Line::from(vec![
                     Span::styled(
                         prefix.to_string(),
                         Style::default()
@@ -228,27 +242,27 @@ fn build_rows(state: &AppState, overview: &Overview, width: usize) -> Vec<Row> {
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(part, Style::default().fg(state.theme.text_active)),
-                ]));
+                ]), &link);
             }
         }
         for step in &project.next_steps {
             let wrapped = wrap(&redact(state, step), width.saturating_sub(6));
             for (i, part) in wrapped.into_iter().enumerate() {
                 let prefix = if i == 0 { "  → " } else { "    " };
-                push(&mut rows, Line::from(vec![
+                push_link(&mut rows, Line::from(vec![
                     Span::styled(prefix.to_string(), Style::default().fg(state.theme.response_arrow)),
                     Span::styled(part, Style::default().fg(state.theme.text_active)),
-                ]));
+                ]), &link);
             }
         }
         for note in &project.active_md {
             for part in wrap(&redact(state, note), width.saturating_sub(4)) {
-                push(&mut rows, Line::from(Span::styled(
+                push_link(&mut rows, Line::from(Span::styled(
                     format!("    {part}"),
                     Style::default()
                         .fg(state.theme.text_inactive)
                         .add_modifier(Modifier::ITALIC),
-                )));
+                )), &link);
             }
         }
         push(&mut rows, Line::default());

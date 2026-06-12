@@ -53,6 +53,11 @@ pub const DASHBOARD_SHOW_TECHNICAL_NAMES: &str = "@dashboard_show_technical_name
 /// restart.
 pub const DASHBOARD_RESPONDED_NEWEST_FIRST: &str = "@dashboard_responded_newest_first";
 
+/// Tab that was active when the dashboard last switched views
+/// (`summary` / `tiles` / `overview`). Restored on startup so the popup
+/// reopens where you left it.
+pub const DASHBOARD_LAST_TAB: &str = "@dashboard_last_tab";
+
 /// Pane id the user was on when the popup last opened. Written on every
 /// dashboard-initiated jump (Enter / click / Space) so the `L` key can
 /// hop back to it. Survives binary restart as a tmux global option.

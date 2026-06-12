@@ -19,11 +19,7 @@ pub(super) fn handle_event(
                 return true;
             }
             KeyCode::Tab => {
-                state.dashboard_tab = match state.dashboard_tab {
-                    DashboardTab::Summary => DashboardTab::Tiles,
-                    DashboardTab::Tiles => DashboardTab::Overview,
-                    DashboardTab::Overview => DashboardTab::Summary,
-                };
+                switch_tab(state, state.dashboard_tab.next());
                 return true;
             }
             KeyCode::Char('s') => {
@@ -591,17 +587,19 @@ fn header_action_at(state: &AppState, row: u16, col: u16) -> Option<HeaderAction
         .map(|t| t.action)
 }
 
+/// Switch view and persist it so the next popup opens on the same tab.
+fn switch_tab(state: &mut AppState, tab: DashboardTab) {
+    state.dashboard_tab = tab;
+    crate::tmux::set_global_option(crate::tmux::DASHBOARD_LAST_TAB, tab.label());
+}
+
 /// Run a header item's action — identical to pressing the matching key,
 /// except `SwitchTab` which flips the view (clicking the tab label or
 /// "Tab: switch").
 fn run_header_action(state: &mut AppState, action: HeaderAction) {
     match action {
         HeaderAction::SwitchTab => {
-            state.dashboard_tab = match state.dashboard_tab {
-                DashboardTab::Summary => DashboardTab::Tiles,
-                DashboardTab::Tiles => DashboardTab::Overview,
-                DashboardTab::Overview => DashboardTab::Summary,
-            };
+            switch_tab(state, state.dashboard_tab.next());
         }
         HeaderAction::ToggleSort => {
             state.sort_by_activity = !state.sort_by_activity;
