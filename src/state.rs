@@ -7,13 +7,15 @@ mod refresh;
 
 pub use focus::FocusState;
 pub use layout::{
-    FrameLayout, HeaderAction, HeaderTarget, SummarySectionRect, SummaryTarget, TileTarget,
+    FrameLayout, HeaderAction, HeaderTarget, OverviewTarget, SummarySectionRect, SummaryTarget,
+    TileTarget,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DashboardTab {
     Summary,
     Tiles,
+    Overview,
 }
 
 /// Identifies a scrollable list section in the dashboard summary view.
@@ -89,6 +91,11 @@ pub struct AppState {
     /// Per-refresh lookup of each pane's most recent activity-log entry,
     /// keyed by pane id. Drives the per-tile context-preview line.
     pub last_activity: std::collections::HashMap<String, crate::activity::ActivityEntry>,
+    /// Parsed agent-overview snapshot for the Overview tab. Reloaded on
+    /// every refresh tick; `None` when the job never produced output.
+    pub overview: Option<crate::overview::Overview>,
+    /// Scroll offset (rows) of the Overview tab.
+    pub overview_scroll: usize,
 }
 
 impl AppState {
@@ -130,6 +137,8 @@ impl AppState {
             session_names: std::collections::HashMap::new(),
             session_names_refreshed_at: None,
             last_activity: std::collections::HashMap::new(),
+            overview: crate::overview::load(),
+            overview_scroll: 0,
         }
     }
 }

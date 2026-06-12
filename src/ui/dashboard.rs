@@ -46,6 +46,7 @@ pub fn draw_dashboard(frame: &mut Frame, state: &mut AppState) {
     match state.dashboard_tab {
         DashboardTab::Summary => draw_summary(frame, state, inner),
         DashboardTab::Tiles => draw_tiles(frame, state, inner),
+        DashboardTab::Overview => super::overview::draw_overview(frame, state, inner),
     }
 }
 
@@ -79,6 +80,7 @@ fn build_header(
     let tab_label = match state.dashboard_tab {
         DashboardTab::Summary => " Summary ",
         DashboardTab::Tiles => " Tiles ",
+        DashboardTab::Overview => " Overview ",
     };
     let names_label = if state.show_technical_names {
         "n: friendly "
@@ -1479,9 +1481,34 @@ fn draw_tile(
         Style::default().fg(state.theme.text_active),
     )));
 
-    // Context preview: latest activity-log entry (tool + label + age),
-    // in the recent-activity feed's style. Omitted when no activity.
-    if let Some(entry) = state.last_activity.get(&pane.pane_id) {
+    // Context preview. Preferred source: the agent-overview job's
+    // `@pane_summary` one-liner (what the pane is doing, in words).
+    // Fallback: latest activity-log entry (tool + label + age).
+    if !pane.summary.is_empty() {
+        let marker = "✦";
+        let marker_w = super::text::display_width(marker);
+        let age = crate::activity::log_mtime(&pane.pane_id)
+            .and_then(crate::time::compact_ago)
+            .filter(|_| !state.privacy_mode);
+        let age_w = age.as_deref().map(super::text::display_width).unwrap_or(0);
+        let text_room = width
+            .saturating_sub(marker_w + 1 + if age_w > 0 { age_w + 1 } else { 0 });
+        let text = redact(state, &truncate_to_width(&pane.summary, text_room));
+        let mut preview: Vec<Span> = vec![
+            Span::styled(marker.to_string(), Style::default().fg(state.theme.accent)),
+            Span::raw(" "),
+            Span::styled(text.clone(), Style::default().fg(state.theme.text_muted)),
+        ];
+        if let Some(age) = age {
+            let used = marker_w + 1 + super::text::display_width(&text);
+            let pad = width.saturating_sub(used + age_w);
+            if pad > 0 {
+                preview.push(Span::raw(" ".repeat(pad)));
+            }
+            preview.push(Span::styled(age, Style::default().fg(state.theme.text_muted)));
+        }
+        lines.push(Line::from(preview));
+    } else if let Some(entry) = state.last_activity.get(&pane.pane_id) {
         let tool_color = ratatui::style::Color::Indexed(entry.tool_color_index());
         let age = crate::activity::log_mtime(&pane.pane_id)
             .and_then(crate::time::compact_ago)

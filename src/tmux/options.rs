@@ -31,6 +31,10 @@ pub const PANE_SESSION_ID: &str = "@pane_session_id";
 pub const PANE_STARTED_AT: &str = "@pane_started_at";
 pub const PANE_STATUS: &str = "@pane_status";
 pub const PANE_SUBAGENTS: &str = "@pane_subagents";
+/// One-line LLM summary of what the pane is doing right now. Written by
+/// the external `agent-overview` job (~10-min cadence), so it can lag or
+/// be absent entirely.
+pub const PANE_SUMMARY: &str = "@pane_summary";
 pub const PANE_WAIT_REASON: &str = "@pane_wait_reason";
 pub const PANE_WORKTREE_BRANCH: &str = "@pane_worktree_branch";
 pub const PANE_WORKTREE_NAME: &str = "@pane_worktree_name";

@@ -1,0 +1,288 @@
+//! Overview tab — renders the agent-overview job's snapshot
+//! (`overview.json`) as a scrollable, attention-first briefing: TL;DR,
+//! one block per project (panes, what's happening, what needs the
+//! developer, next steps, matching _ACTIVE.md notes), idle panes last.
+
+use ratatui::Frame;
+use ratatui::layout::Rect;
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::Paragraph;
+
+use crate::overview::Overview;
+use crate::state::{AppState, OverviewTarget};
+
+use super::text::display_width;
+
+/// One rendered row plus the pane it jumps to when clicked (if any).
+struct Row {
+    line: Line<'static>,
+    pane_id: Option<String>,
+}
+
+fn redact(state: &AppState, s: &str) -> String {
+    if state.privacy_mode {
+        super::text::obfuscate(s)
+    } else {
+        s.to_string()
+    }
+}
+
+/// Greedy word wrap on display width. Returns at least one (possibly
+/// empty) line so callers can map text 1:1 to rows.
+fn wrap(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(8);
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for word in text.split_whitespace() {
+        let cur_w = display_width(&cur);
+        let word_w = display_width(word);
+        if cur.is_empty() {
+            cur = word.to_string();
+        } else if cur_w + 1 + word_w <= width {
+            cur.push(' ');
+            cur.push_str(word);
+        } else {
+            out.push(cur);
+            cur = word.to_string();
+        }
+    }
+    out.push(cur);
+    out
+}
+
+fn status_color(state: &AppState, status: &str) -> ratatui::style::Color {
+    match status {
+        "running" | "background" => state.theme.status_running,
+        "waiting" => state.theme.status_waiting,
+        "error" => state.theme.status_error,
+        "idle" => state.theme.status_idle,
+        _ => state.theme.status_unknown,
+    }
+}
+
+pub fn draw_overview(frame: &mut Frame, state: &mut AppState, area: Rect) {
+    state.layout.overview_targets = Vec::new();
+    state.layout.overview_view_height = area.height as usize;
+
+    let Some(overview) = state.overview.clone() else {
+        let msg = Paragraph::new(Line::from(Span::styled(
+            "No overview yet — the agent-overview job hasn't produced output.",
+            Style::default().fg(state.theme.text_inactive),
+        )));
+        frame.render_widget(msg, area);
+        state.layout.overview_total_lines = 1;
+        return;
+    };
+
+    let width = area.width as usize;
+    let rows = build_rows(state, &overview, width);
+
+    state.layout.overview_total_lines = rows.len();
+    let max_scroll = rows.len().saturating_sub(area.height as usize);
+    if state.overview_scroll > max_scroll {
+        state.overview_scroll = max_scroll;
+    }
+    let scroll = state.overview_scroll;
+
+    let visible: Vec<Line> = rows
+        .iter()
+        .skip(scroll)
+        .take(area.height as usize)
+        .map(|r| r.line.clone())
+        .collect();
+
+    // Register click targets for the visible pane rows.
+    for (offset, row) in rows.iter().skip(scroll).take(area.height as usize).enumerate() {
+        if let Some(pane_id) = &row.pane_id {
+            state.layout.overview_targets.push(OverviewTarget {
+                rect: Rect {
+                    x: area.x,
+                    y: area.y + offset as u16,
+                    width: area.width,
+                    height: 1,
+                },
+                pane_id: pane_id.clone(),
+            });
+        }
+    }
+
+    frame.render_widget(Paragraph::new(visible), area);
+}
+
+fn build_rows(state: &AppState, overview: &Overview, width: usize) -> Vec<Row> {
+    let mut rows: Vec<Row> = Vec::new();
+    let muted = Style::default().fg(state.theme.text_muted);
+    let inactive = Style::default().fg(state.theme.text_inactive);
+    let title_style = Style::default()
+        .fg(state.theme.section_title)
+        .add_modifier(Modifier::BOLD);
+
+    fn push(rows: &mut Vec<Row>, line: Line<'static>) {
+        rows.push(Row { line, pane_id: None });
+    }
+
+    // ── Status line ──────────────────────────────────────────────────
+    let ago = crate::time::compact_ago(overview.updated_at).unwrap_or_else(|| "?".into());
+    let active_panes: usize = overview.projects.iter().map(|p| p.panes.len()).sum();
+    push(&mut rows, Line::from(Span::styled(
+        format!(
+            "Updated {ago} ago · {} project{} · {active_panes} active pane{} · {} idle",
+            overview.projects.len(),
+            if overview.projects.len() == 1 { "" } else { "s" },
+            if active_panes == 1 { "" } else { "s" },
+            overview.idle.len(),
+        ),
+        inactive,
+    )));
+    push(&mut rows, Line::default());
+
+    // ── TL;DR ────────────────────────────────────────────────────────
+    if !overview.tldr.is_empty() {
+        push(&mut rows, Line::from(Span::styled("TL;DR", title_style)));
+        for item in &overview.tldr {
+            let wrapped = wrap(&redact(state, item), width.saturating_sub(4));
+            for (i, part) in wrapped.into_iter().enumerate() {
+                let prefix = if i == 0 { "  • " } else { "    " };
+                push(&mut rows, Line::from(vec![
+                    Span::styled(prefix.to_string(), Style::default().fg(state.theme.accent)),
+                    Span::styled(part, Style::default().fg(state.theme.text_active)),
+                ]));
+            }
+        }
+        push(&mut rows, Line::default());
+    }
+
+    // ── Projects ─────────────────────────────────────────────────────
+    for project in &overview.projects {
+        let head_color = if project.attention {
+            state.theme.status_waiting
+        } else {
+            state.theme.section_title
+        };
+        let mut head = vec![Span::styled(
+            format!("▍{}", redact(state, &project.name)),
+            Style::default().fg(head_color).add_modifier(Modifier::BOLD),
+        )];
+        if project.attention {
+            head.push(Span::styled(
+                "  ⚠ needs you",
+                Style::default().fg(state.theme.status_waiting),
+            ));
+        }
+        push(&mut rows, Line::from(head));
+
+        for pane in &project.panes {
+            let age = pane
+                .age_minutes
+                .filter(|_| !state.privacy_mode)
+                .map(|m| {
+                    if m >= 60 {
+                        format!(" · {}h{:02}", m / 60, m % 60)
+                    } else {
+                        format!(" · {m}m")
+                    }
+                })
+                .unwrap_or_default();
+            let line = Line::from(vec![
+                Span::styled("  ▸ ".to_string(), Style::default().fg(state.theme.accent)),
+                Span::styled(pane.target.clone(), Style::default().fg(state.theme.text_active)),
+                Span::styled(format!(" · {}", pane.agent), muted),
+                Span::styled(
+                    format!(" · {}", pane.status),
+                    Style::default().fg(status_color(state, &pane.status)),
+                ),
+                Span::styled(age, muted),
+            ]);
+            rows.push(Row {
+                line,
+                pane_id: Some(pane.pane_id.clone()),
+            });
+            if !pane.summary.is_empty() {
+                for part in wrap(&redact(state, &pane.summary), width.saturating_sub(6)) {
+                    rows.push(Row {
+                        line: Line::from(Span::styled(format!("      {part}"), muted)),
+                        pane_id: Some(pane.pane_id.clone()),
+                    });
+                }
+            }
+        }
+
+        if !project.doing.is_empty() {
+            for part in wrap(&redact(state, &project.doing), width.saturating_sub(2)) {
+                push(&mut rows, Line::from(Span::styled(format!("  {part}"), muted)));
+            }
+        }
+        if !project.needs_from_you.is_empty() && project.needs_from_you != "null" {
+            let wrapped = wrap(
+                &redact(state, &project.needs_from_you),
+                width.saturating_sub(13),
+            );
+            for (i, part) in wrapped.into_iter().enumerate() {
+                let prefix = if i == 0 { "  ⚠ Needs you: " } else { "    " };
+                push(&mut rows, Line::from(vec![
+                    Span::styled(
+                        prefix.to_string(),
+                        Style::default()
+                            .fg(state.theme.status_waiting)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(part, Style::default().fg(state.theme.text_active)),
+                ]));
+            }
+        }
+        for step in &project.next_steps {
+            let wrapped = wrap(&redact(state, step), width.saturating_sub(6));
+            for (i, part) in wrapped.into_iter().enumerate() {
+                let prefix = if i == 0 { "  → " } else { "    " };
+                push(&mut rows, Line::from(vec![
+                    Span::styled(prefix.to_string(), Style::default().fg(state.theme.response_arrow)),
+                    Span::styled(part, Style::default().fg(state.theme.text_active)),
+                ]));
+            }
+        }
+        for note in &project.active_md {
+            for part in wrap(&redact(state, note), width.saturating_sub(4)) {
+                push(&mut rows, Line::from(Span::styled(
+                    format!("    {part}"),
+                    Style::default()
+                        .fg(state.theme.text_inactive)
+                        .add_modifier(Modifier::ITALIC),
+                )));
+            }
+        }
+        push(&mut rows, Line::default());
+    }
+
+    // ── Idle ─────────────────────────────────────────────────────────
+    if !overview.idle.is_empty() {
+        rows.push(Row {
+            line: Line::from(Span::styled(
+                format!("Idle ({})", overview.idle.len()),
+                title_style,
+            )),
+            pane_id: None,
+        });
+        for pane in &overview.idle {
+            let task = redact(state, &pane.task);
+            let line = Line::from(vec![
+                Span::styled(format!("  {} · ", pane.target), inactive),
+                Span::styled(redact(state, &pane.project), inactive),
+                Span::styled(
+                    if task.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" — {task}")
+                    },
+                    inactive,
+                ),
+            ]);
+            rows.push(Row {
+                line,
+                pane_id: Some(pane.pane_id.clone()),
+            });
+        }
+    }
+
+    rows
+}

@@ -19,6 +19,7 @@ impl AppState {
         self.apply_session_names();
         crate::pending::sweep_stale_marks(&mut self.repo_groups);
         self.refresh_last_activity();
+        self.overview = crate::overview::load();
         self.sort_groups_if_needed();
     }
 

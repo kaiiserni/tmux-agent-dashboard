@@ -46,6 +46,9 @@ pub struct PaneInfo {
     /// Recorded `run_in_background` command (sticky per session). Used to
     /// probe whether a `Background` pane's shell is actually still alive.
     pub bg_cmd: String,
+    /// One-line summary from `@pane_summary` (agent-overview job). Empty
+    /// when the job hasn't run or the pane wasn't active during its pass.
+    pub summary: String,
 }
 
 #[derive(Debug, Clone, Default)]

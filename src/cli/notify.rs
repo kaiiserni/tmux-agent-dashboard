@@ -278,6 +278,7 @@ mod tests {
             window_name: String::new(),
             auto_rename: false,
             bg_cmd: String::new(),
+            summary: String::new(),
         }
     }
 

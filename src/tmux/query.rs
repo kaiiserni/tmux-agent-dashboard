@@ -9,8 +9,8 @@ use super::commands::run_tmux;
 use super::options::{
     PANE_AGENT, PANE_ATTENTION, PANE_BG_CMD, PANE_CWD, PANE_LAST_SEEN_AT, PANE_MARKED_UNREAD_AT,
     PANE_NAME, PANE_PERMISSION_MODE, PANE_PROMPT, PANE_PROMPT_SOURCE, PANE_ROLE, PANE_SESSION_ID,
-    PANE_STARTED_AT, PANE_STATUS, PANE_SUBAGENTS, PANE_WAIT_REASON, PANE_WORKTREE_BRANCH,
-    PANE_WORKTREE_NAME,
+    PANE_STARTED_AT, PANE_STATUS, PANE_SUBAGENTS, PANE_SUMMARY, PANE_WAIT_REASON,
+    PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME,
 };
 use super::types::{
     AgentType, PaneInfo, PaneStatus, PermissionMode, SessionInfo, WindowInfo, WorktreeMetadata,
@@ -23,7 +23,7 @@ mod session_line_field {
     pub const WINDOW_ACTIVE: usize = 4;
     pub const AUTOMATIC_RENAME: usize = 5;
     pub const PANE_LINE_OFFSET: usize = 6;
-    pub const MIN_FIELDS: usize = 27;
+    pub const MIN_FIELDS: usize = 28;
 }
 
 mod pane_line_field {
@@ -49,7 +49,8 @@ mod pane_line_field {
     pub const BG_CMD: usize = 20;
     pub const LAST_SEEN_AT: usize = 21;
     pub const MARKED_UNREAD_AT: usize = 22;
-    pub const MIN_FIELDS: usize = 23;
+    pub const SUMMARY: usize = 23;
+    pub const MIN_FIELDS: usize = 24;
 }
 
 fn q(field: &str) -> String {
@@ -87,6 +88,7 @@ fn pane_format() -> String {
         q(PANE_BG_CMD),
         q(PANE_LAST_SEEN_AT),
         q(PANE_MARKED_UNREAD_AT),
+        q(PANE_SUMMARY),
     ]
     .join("|")
 }
@@ -212,6 +214,7 @@ fn parse_pane_fields(parts: &[String]) -> Option<PaneInfo> {
         window_name: String::new(),
         auto_rename: false,
         bg_cmd: parts[pane_line_field::BG_CMD].to_string(),
+        summary: parts[pane_line_field::SUMMARY].to_string(),
     })
 }
 

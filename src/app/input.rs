@@ -21,7 +21,8 @@ pub(super) fn handle_event(
             KeyCode::Tab => {
                 state.dashboard_tab = match state.dashboard_tab {
                     DashboardTab::Summary => DashboardTab::Tiles,
-                    DashboardTab::Tiles => DashboardTab::Summary,
+                    DashboardTab::Tiles => DashboardTab::Overview,
+                    DashboardTab::Overview => DashboardTab::Summary,
                 };
                 return true;
             }
@@ -75,6 +76,11 @@ pub(super) fn handle_event(
         {
             return true;
         }
+        if state.dashboard_tab == DashboardTab::Overview
+            && handle_dashboard_overview_key(state, key.code)
+        {
+            return true;
+        }
     }
 
     if let Event::Mouse(mouse) = &ev {
@@ -103,6 +109,12 @@ pub(super) fn handle_event(
                         return true;
                     }
                 }
+                DashboardTab::Overview => {
+                    if let Some(pane_id) = find_overview_pane_at(state, mouse.row, mouse.column) {
+                        jump_to_pane(state, &pane_id);
+                        return true;
+                    }
+                }
                 }
             }
             // Right-click anywhere closes the dashboard — mirrors the
@@ -128,6 +140,14 @@ pub(super) fn handle_event(
                 {
                     switch_to_group(state, prev, false);
                 }
+                return true;
+            }
+            MouseEventKind::ScrollDown if state.dashboard_tab == DashboardTab::Overview => {
+                scroll_overview(state, 3);
+                return true;
+            }
+            MouseEventKind::ScrollUp if state.dashboard_tab == DashboardTab::Overview => {
+                scroll_overview(state, -3);
                 return true;
             }
             MouseEventKind::ScrollDown if state.dashboard_tab == DashboardTab::Summary => {
@@ -579,7 +599,8 @@ fn run_header_action(state: &mut AppState, action: HeaderAction) {
         HeaderAction::SwitchTab => {
             state.dashboard_tab = match state.dashboard_tab {
                 DashboardTab::Summary => DashboardTab::Tiles,
-                DashboardTab::Tiles => DashboardTab::Summary,
+                DashboardTab::Tiles => DashboardTab::Overview,
+                DashboardTab::Overview => DashboardTab::Summary,
             };
         }
         HeaderAction::ToggleSort => {
@@ -635,6 +656,8 @@ fn selected_pane_id(state: &AppState) -> Option<String> {
             .summary_targets
             .get(state.summary_selected)
             .map(|t| t.pane_id.clone()),
+        // Overview has no row selection; header `c: clear` is a no-op there.
+        DashboardTab::Overview => None,
     }
 }
 
@@ -843,6 +866,45 @@ fn find_summary_at(state: &AppState, row: u16, col: u16) -> Option<usize> {
         t.rect
             .contains(ratatui::layout::Position { x: col, y: row })
     })
+}
+
+// ─── Overview tab ────────────────────────────────────────────────────
+
+fn find_overview_pane_at(state: &AppState, row: u16, col: u16) -> Option<String> {
+    state
+        .layout
+        .overview_targets
+        .iter()
+        .find(|t| {
+            t.rect
+                .contains(ratatui::layout::Position { x: col, y: row })
+        })
+        .map(|t| t.pane_id.clone())
+}
+
+fn scroll_overview(state: &mut AppState, delta: isize) {
+    let max = state
+        .layout
+        .overview_total_lines
+        .saturating_sub(state.layout.overview_view_height);
+    state.overview_scroll = state
+        .overview_scroll
+        .saturating_add_signed(delta)
+        .min(max);
+}
+
+fn handle_dashboard_overview_key(state: &mut AppState, code: KeyCode) -> bool {
+    let page = state.layout.overview_view_height.saturating_sub(1).max(1) as isize;
+    match code {
+        KeyCode::Char('j') | KeyCode::Down => scroll_overview(state, 1),
+        KeyCode::Char('k') | KeyCode::Up => scroll_overview(state, -1),
+        KeyCode::PageDown => scroll_overview(state, page),
+        KeyCode::PageUp => scroll_overview(state, -page),
+        KeyCode::Char('g') | KeyCode::Home => state.overview_scroll = 0,
+        KeyCode::Char('G') | KeyCode::End => scroll_overview(state, isize::MAX / 2),
+        _ => return false,
+    }
+    true
 }
 
 // ─── Summary section scroll helpers ─────────────────────────────────

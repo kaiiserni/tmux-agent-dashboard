@@ -26,6 +26,18 @@ pub struct FrameLayout {
     /// Clickable header items (title bar of the outer block). Each entry
     /// is one action keyword and the x-range it occupies on the border row.
     pub header_targets: Vec<HeaderTarget>,
+    /// Clickable pane rows in the Overview tab (visible portion only).
+    pub overview_targets: Vec<OverviewTarget>,
+    /// Total rendered line count of the Overview tab, for scroll clamping.
+    pub overview_total_lines: usize,
+    /// Inner height of the Overview tab viewport, for page-scroll steps.
+    pub overview_view_height: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct OverviewTarget {
+    pub rect: Rect,
+    pub pane_id: String,
 }
 
 /// Action triggered by clicking a header item. Mirrors the matching key
