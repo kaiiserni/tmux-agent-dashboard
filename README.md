@@ -5,34 +5,19 @@ aggregate counters, attention / waiting / responded lists on the left,
 running / idle lists on the right, and a global recent-activity feed at
 the bottom. Also includes a tiles grid view for a quick visual overview.
 
-## Self-contained
+## Agent hooks
 
-No plugin dependencies. The dashboard's own hook-CLI writes the pane state it
-reads: your agents call `tmux-agent-dashboard hook <agent> <event>`, which the
-adapters (`src/adapter/*.rs`) translate into the `@pane_*` options the TUI shows.
-Wire the agent side up once with `install-hooks` (below). Panes without
-`@pane_agent` are still detected via a process-tree scan
-(`@dashboard_detect_fallback`, default on).
-
-(Earlier versions consumed options from the `tmux-agent-sidebar` plugin; that
-dependency is gone.)
-
-## Hook setup (`install-hooks`)
-
-Generate the agent-side hook config from the adapters' own registrations:
+Agents call `tmux-agent-dashboard hook <agent> <event>`, which writes the
+`@pane_*` state the TUI reads. Generate that config from the adapters:
 
 ```bash
-# print the config snippet (safe — review, then merge yourself):
-tmux-agent-dashboard install-hooks claude
-tmux-agent-dashboard install-hooks codex
-
-# or merge it straight into the agent's config (backs up first, keeps other hooks):
-tmux-agent-dashboard install-hooks claude --write   # ~/.claude/settings.json
-tmux-agent-dashboard install-hooks codex  --write   # ~/.codex/hooks.json
+tmux-agent-dashboard install-hooks claude          # print, review, merge yourself
+tmux-agent-dashboard install-hooks claude --write  # merge into ~/.claude/settings.json (backs up, keeps other hooks)
+tmux-agent-dashboard install-hooks codex  --write  # ~/.codex/hooks.json
 ```
 
-Supported: `claude`, `codex`, `antigravity`, `pi` (print + `--write`). Each event
-maps to a `tmux-agent-dashboard hook <agent> <event>` command.
+`claude`, `codex`, `antigravity`, `pi`. Panes without `@pane_agent` are detected
+via a process-tree scan (`@dashboard_detect_fallback`, default on).
 
 ## Install
 
