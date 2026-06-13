@@ -174,6 +174,32 @@ configured the daemon exits with a message on stderr.
   `@pane_last_seen_at` so the dashboard can derive when you last
   looked at a pane — the basis for the Responded heuristic
 
+### Pane state contract (`@pane_*`)
+
+The dashboard is a consumer of per-pane tmux options written by the
+[`tmux-agent-sidebar`](https://github.com/hiroppy/tmux-agent-sidebar) hooks
+(except `@pane_last_seen_at`/`@dashboard_marked_unread_at`, which this binary
+writes itself, and `@pane_summary`, which an external producer like
+`agent-overview` writes). This is the shared contract; any reader (this TUI,
+the `agent-overview` job) reads the same options:
+
+| Option | Meaning |
+|---|---|
+| `@pane_agent` | agent kind (`claude`/`codex`/`opencode`/`antigravity`/`pi`) — a pane is only an "agent pane" when set |
+| `@pane_status` | `running` / `waiting` / `idle` / `background` / `error` |
+| `@pane_attention` | set when the agent flagged it needs the developer |
+| `@pane_cwd` | working directory |
+| `@pane_prompt` (+ `@pane_prompt_source`) | the task prompt the agent is running |
+| `@pane_wait_reason` | what a `waiting` pane is blocked on |
+| `@pane_permission_mode` | Claude permission mode (`default`/`plan`/`acceptEdits`/`auto`/…) |
+| `@pane_started_at` / `@pane_last_seen_at` | epoch seconds: pane start / last user focus |
+| `@pane_session_id` | Claude session id (resolves a friendly session name) |
+| `@pane_worktree_name` / `@pane_worktree_branch` | git worktree context |
+| `@pane_summary` | one-line LLM summary of what the pane is doing now (external producer; may lag) |
+
+Plus `/tmp/tmux-agent-activity_<N>.log` lines (`epoch|tool|label`) for the
+recent-activity feed.
+
 ## Build from source
 
 macOS (arm64):

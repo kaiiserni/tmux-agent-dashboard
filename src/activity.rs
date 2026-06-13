@@ -98,7 +98,14 @@ fn decode_pane_id_from_log(filename: &str) -> Option<String> {
     if stem.is_empty() {
         return None;
     }
-    Some(stem.replace('_', "%"))
+    let id = stem.replace('_', "%");
+    // tmux pane ids are `%<digits>` — reject anything else so a stray
+    // /tmp file can't inject a bogus pane id into the activity feed.
+    if id.starts_with('%') && id.len() >= 2 && id[1..].bytes().all(|b| b.is_ascii_digit()) {
+        Some(id)
+    } else {
+        None
+    }
 }
 
 /// Merge activity entries from every `/tmp/tmux-agent-activity*.log` file.
@@ -165,6 +172,19 @@ mod tests {
             let path = log_file_path(id);
             let name = path.file_name().unwrap().to_str().unwrap();
             assert_eq!(decode_pane_id_from_log(name).as_deref(), Some(id));
+        }
+    }
+
+    #[test]
+    fn rejects_non_pane_id_log_names() {
+        // Stray /tmp files that happen to match the prefix must not decode.
+        for bad in [
+            "tmux-agent-activity.log",          // empty stem
+            "tmux-agent-activity_.log",         // "%" only
+            "tmux-agent-activity_foo.log",      // non-digit
+            "tmux-agent-activity_1_2.log",      // "%1%2"
+        ] {
+            assert_eq!(decode_pane_id_from_log(bad), None, "should reject {bad}");
         }
     }
 }

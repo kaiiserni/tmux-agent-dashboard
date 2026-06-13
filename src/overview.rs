@@ -54,7 +54,10 @@ pub fn overview_path() -> Option<PathBuf> {
         return None;
     }
     let expanded = if let Some(rest) = raw.strip_prefix("~/") {
-        PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(rest)
+        // Without a real HOME (stripped cron/tmux env) a default would make a
+        // bogus absolute path that silently never loads — bail instead.
+        let home = std::env::var("HOME").ok().filter(|h| !h.is_empty())?;
+        PathBuf::from(home).join(rest)
     } else {
         PathBuf::from(raw)
     };
