@@ -64,6 +64,11 @@ pub const DASHBOARD_LAST_TAB: &str = "@dashboard_last_tab";
 /// A leading `~` is expanded to $HOME. See README for the file schema.
 pub const DASHBOARD_OVERVIEW_FILE: &str = "@dashboard_overview_file";
 
+/// When `1`/unset (default on), panes without `@pane_agent` are probed via a
+/// process-tree scan to detect a hookless agent (e.g. a quick codex run). Set
+/// to `0` to disable the `ps` scan.
+pub const DASHBOARD_DETECT_FALLBACK: &str = "@dashboard_detect_fallback";
+
 /// Pane id the user was on when the popup last opened. Written on every
 /// dashboard-initiated jump (Enter / click / Space) so the `L` key can
 /// hop back to it. Survives binary restart as a tmux global option.

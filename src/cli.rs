@@ -3,6 +3,7 @@
 //! only the hook port lives here.
 
 pub mod hook;
+pub mod install_hooks;
 pub mod notify;
 
 use std::io::Read;

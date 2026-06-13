@@ -1,11 +1,11 @@
 //! Tmux `list-panes -a` reader.
 //!
-//! Builds the same `Vec<SessionInfo>` shape that the sidebar uses, but
-//! drops the Codex process-snapshot fallback (the dashboard is a pure
-//! consumer — the sidebar's hooks are the source of truth for which
-//! panes have an agent).
+//! `@pane_agent` (set by the agent hooks) is the primary source of truth for
+//! which panes have an agent. For panes without it, an optional process-tree
+//! scan (`@dashboard_detect_fallback`) detects a hookless agent.
 
 use super::commands::run_tmux;
+use crate::process::ProcessSnapshot;
 use super::options::{
     PANE_AGENT, PANE_ATTENTION, PANE_BG_CMD, PANE_CWD, PANE_LAST_SEEN_AT, PANE_MARKED_UNREAD_AT,
     PANE_NAME, PANE_PERMISSION_MODE, PANE_PROMPT, PANE_PROMPT_SOURCE, PANE_ROLE, PANE_SESSION_ID,
@@ -40,6 +40,7 @@ mod pane_line_field {
     pub const PROMPT_SOURCE: usize = 10;
     pub const STARTED_AT: usize = 11;
     pub const WAIT_REASON: usize = 12;
+    pub const PANE_PID: usize = 13;
     pub const SUBAGENTS: usize = 14;
     pub const PANE_CWD: usize = 15;
     pub const PERMISSION_MODE: usize = 16;
@@ -101,6 +102,14 @@ pub fn query_sessions() -> Vec<SessionInfo> {
         Some(s) => s,
         None => return vec![],
     };
+
+    // Process-tree fallback: one ps snapshot, lazily taken only if a pane lacks
+    // `@pane_agent` and the option isn't disabled.
+    let fallback_on = super::options::get_option(super::options::DASHBOARD_DETECT_FALLBACK)
+        .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+        .unwrap_or(true);
+    let mut snapshot: Option<Option<ProcessSnapshot>> = None;
+
     let mut sessions_map: SessionMap = indexmap::IndexMap::new();
 
     for line in raw.lines() {
@@ -124,7 +133,12 @@ pub fn query_sessions() -> Vec<SessionInfo> {
                 panes: Vec::new(),
             });
 
-        if let Some(mut pane) = parse_pane_fields(pane_fields) {
+        let fallback = if fallback_on {
+            snapshot.get_or_insert_with(ProcessSnapshot::scan).as_ref()
+        } else {
+            None
+        };
+        if let Some(mut pane) = parse_pane_fields(pane_fields, fallback) {
             pane.window_name = parts[session_line_field::WINDOW_NAME].to_string();
             pane.auto_rename = parts[session_line_field::AUTOMATIC_RENAME] == "1";
             pane.tmux_session_name = session_name.to_string();
@@ -152,7 +166,7 @@ fn finalize_sessions(sessions_map: SessionMap) -> Vec<SessionInfo> {
     sessions
 }
 
-fn parse_pane_fields(parts: &[String]) -> Option<PaneInfo> {
+fn parse_pane_fields(parts: &[String], fallback: Option<&ProcessSnapshot>) -> Option<PaneInfo> {
     if parts.len() < pane_line_field::MIN_FIELDS {
         return None;
     }
@@ -161,7 +175,15 @@ fn parse_pane_fields(parts: &[String]) -> Option<PaneInfo> {
         return None;
     }
 
-    let agent = AgentType::from_label(&parts[pane_line_field::AGENT])?;
+    // `@pane_agent` first; if absent, fall back to a process-tree probe under
+    // the pane's pid (detects a hookless agent like a bare codex run).
+    let agent = match AgentType::from_label(&parts[pane_line_field::AGENT]) {
+        Some(a) => a,
+        None => {
+            let pid: u32 = parts[pane_line_field::PANE_PID].parse().ok()?;
+            fallback?.detect_agent(pid)?
+        }
+    };
 
     let pane_cwd = &parts[pane_line_field::PANE_CWD];
     let path = if !pane_cwd.is_empty() {

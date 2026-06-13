@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # tmux-agent-dashboard — popup dashboard for Claude / Codex agents.
-# Depends on tmux-agent-sidebar (hooks write the pane state we consume).
+# Self-contained: agent hooks call `tmux-agent-dashboard hook <agent> <event>`
+# (set up via `install-hooks`), which writes the @pane_* state the TUI reads.
 
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -22,13 +23,6 @@ fi
 if [[ -z "$BIN" ]]; then
     tmux display-message "tmux-agent-dashboard: binary not found; run 'cargo build --release' in $PLUGIN_DIR"
     exit 0
-fi
-
-# Sanity check: tmux-agent-sidebar must be installed since we read the
-# pane options + activity logs it writes.
-if [[ -z "$(tmux show -gv @agent_sidebar_bin 2>/dev/null)" ]] \
-   && [[ ! -x "$HOME/.tmux/plugins/tmux-agent-sidebar/target/release/tmux-agent-sidebar" ]]; then
-    tmux display-message "tmux-agent-dashboard: tmux-agent-sidebar plugin not detected — install it first"
 fi
 
 tmux set -g @dashboard_bin "$BIN"

@@ -71,6 +71,10 @@ fn main() -> io::Result<()> {
             let code = hook::cmd_hook(&args[1..]);
             std::process::exit(code);
         }
+        Some("install-hooks") => {
+            let code = cli::install_hooks::cmd_install_hooks(&args[1..]);
+            std::process::exit(code);
+        }
         Some("notify-daemon") => {
             let code = cli::notify::cmd_notify_daemon();
             std::process::exit(code);

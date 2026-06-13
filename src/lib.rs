@@ -7,6 +7,7 @@ pub mod event;
 pub mod group;
 pub mod overview;
 pub mod pending;
+pub mod process;
 pub mod session;
 pub mod state;
 pub mod time;
