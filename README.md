@@ -47,21 +47,39 @@ run-shell '~/projects/tmux-agent-dashboard/tmux-agent-dashboard.tmux'
 
 ## Keybindings
 
+Open the dashboard with `prefix + ñ`. These keys work in any tab:
+
 | Key | Action |
 |---|---|
-| `prefix + ñ` | Open dashboard popup |
 | `Tab` | Cycle Tiles / Summary / Overview |
 | `s` | Toggle attention-first sort |
+| `n` | Toggle technical names (repo + branch vs friendly name) |
+| `o` | Toggle Responded order (oldest-first review queue vs newest-first) |
 | `p` | Toggle redact mode (hide ages/timestamps + mask text, for screenshots) |
-| `j` / `k` / `↓` / `↑` | Move row selection (auto-scrolls across lists) |
-| `h` / `l` / `←` / `→` | Jump between columns (Summary view) |
-| `g` / `G` | Jump to first / last row (Summary) |
-| `PageDown` / `PageUp` | Scroll the active list |
-| `Enter` or click | Activate pane and close popup |
-| `Space` | Jump to the top pane that needs attention and close popup |
+| `Space` | Jump to the top pane that needs attention and close |
 | `L` | Jump back to the origin pane (toggles back on a second press) |
+| `Enter` or click | Activate the selected pane and close |
+| `q` / `Esc` / right-click | Close |
+
+Move around inside a view:
+
+| Key | Action |
+|---|---|
+| `j` / `k` / `↓` / `↑` | Move the selection |
+| `h` / `l` / `←` / `→` | Between columns (Summary) or groups (Tiles) |
+| `g` / `G` | First / last (Summary, Overview) |
+| `PageDown` / `PageUp` | Scroll the active list |
+| `Ctrl+d` / `Ctrl+u` | Half-page scroll (Overview) |
 | Mouse wheel | Scroll the list under the cursor |
-| `q` / `Esc` | Close popup |
+
+Act on the selected pane:
+
+| Key | Action |
+|---|---|
+| `m` | Toggle marked-unread (Tiles, Summary) |
+| `c` | Clear a stuck pending state: attention, status, wait-reason and mark (Tiles, Summary) |
+
+The Tiles view adds `f` / `z` to cycle folding (one group open, all closed, all open), `d` / `u` to step between groups, and `a` to hide idle panes.
 
 The header items are clickable too: clicking one runs the matching key (and clicking the tab label or `Tab: switch` flips the view).
 
@@ -78,14 +96,15 @@ bind -N "agents: jump picker" n display-popup -E -w 76 -h 18 \
   '~/projects/tmux-agent-dashboard/bin/tmux-agent-dashboard jump'
 ```
 
-It lists the same panes as the status bar, numbered, with a short
-countdown. Leave it alone and it jumps to the most urgent pane (the plain
-`next` behaviour); press a number, or navigate and confirm, to pick
-another. The first navigation key cancels the countdown.
+The status bar numbers its first nine pending panes (superscript ¹-⁹); the
+picker lists the same panes under those numbers, with a short countdown.
+Leave it alone and it jumps to the most urgent pane (the plain `next`
+behaviour); press a number, or navigate and confirm, to pick another. The
+first navigation key cancels the countdown.
 
 | Key | Action |
 |---|---|
-| `1`–`9` | Jump to that numbered pane |
+| `1`-`9` | Jump to that numbered pane |
 | `j` / `k` / `↓` / `↑` | Move selection (cancels the countdown) |
 | `g` / `G` | First / last |
 | `Enter` | Jump to the highlighted pane |
@@ -93,7 +112,8 @@ another. The first navigation key cancels the countdown.
 | `q` / `Esc` | Close without jumping |
 
 A single pending pane skips the popup and jumps straight there. The
-countdown defaults to 500ms (`@dashboard_jump_timeout_ms`).
+countdown defaults to 250ms (`@dashboard_jump_timeout_ms`); set it to `0`
+to wait for a key instead.
 
 ## Configuration
 
@@ -102,7 +122,7 @@ set -g @dashboard_key    'ñ'      # default
 set -g @dashboard_width  '90%'    # default
 set -g @dashboard_height '85%'    # default
 
-set -g @dashboard_jump_timeout_ms '500'  # jump-picker countdown (ms); 0 = wait for a key
+set -g @dashboard_jump_timeout_ms '250'  # jump-picker countdown (ms); 0 = wait for a key
 ```
 
 The sidebar's `@sidebar_color_*` and `@sidebar_icon_*` options are
@@ -112,7 +132,7 @@ reused so visual customisation carries over.
 
 The third tab ("Overview") renders a prioritised, per-project briefing from an
 external JSON file. The dashboard is a **pure consumer** with no built-in
-producer — point it at a file and it polls that file on every refresh:
+producer. Point it at a file and it polls that file on every refresh:
 
 ```tmux
 set -g @dashboard_overview_file '~/.local/state/agent-overview/overview.json'
@@ -169,7 +189,7 @@ can add their own.
 
 A background daemon can push a Google Chat message whenever a pane
 transitions into an attention-worthy state (an explicit attention flag,
-or status Waiting / Error) — handy when you work remotely over
+or status Waiting / Error), handy when you work remotely over
 mosh/ssh and don't want to keep opening the popup.
 
 1. In Google Chat, open the target space → space name → **Apps &
@@ -208,7 +228,7 @@ configured the daemon exits with a message on stderr.
   `/tmp/tmux-agent-activity*.log` for the recent activity feed
 - `seen <pane_id>` (bound to `after-select-pane`) writes
   `@pane_last_seen_at` so the dashboard can derive when you last
-  looked at a pane — the basis for the Responded heuristic. It also
+  looked at a pane, the basis for the Responded heuristic. It also
   forces a status-line redraw so a pane that just became seen drops off
   the pending bar at once instead of lingering until the next
   `status-interval` tick
@@ -224,7 +244,7 @@ the `agent-overview` job) reads the same options:
 
 | Option | Meaning |
 |---|---|
-| `@pane_agent` | agent kind (`claude`/`codex`/`opencode`/`antigravity`/`pi`) — a pane is only an "agent pane" when set |
+| `@pane_agent` | agent kind (`claude`/`codex`/`opencode`/`antigravity`/`pi`); a pane is only an "agent pane" when set |
 | `@pane_status` | `running` / `waiting` / `idle` / `background` / `error` |
 | `@pane_attention` | set when the agent flagged it needs the developer |
 | `@pane_cwd` | working directory |

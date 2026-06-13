@@ -30,7 +30,7 @@ use crate::tmux;
 use crate::ui::colors::ColorTheme;
 
 const JUMP_TIMEOUT_MS: &str = "@dashboard_jump_timeout_ms";
-const DEFAULT_TIMEOUT_MS: u64 = 500;
+const DEFAULT_TIMEOUT_MS: u64 = 250;
 
 /// Restores the terminal on drop, mirroring `main.rs`'s `TuiSession` but
 /// without mouse capture (the picker is keyboard-only).
