@@ -72,6 +72,63 @@ set -g @dashboard_height '85%'    # default
 The sidebar's `@sidebar_color_*` and `@sidebar_icon_*` options are
 reused so visual customisation carries over.
 
+## Overview tab
+
+The third tab ("Overview") renders a prioritised, per-project briefing from an
+external JSON file. The dashboard is a **pure consumer** with no built-in
+producer — point it at a file and it polls that file on every refresh:
+
+```tmux
+set -g @dashboard_overview_file '~/.local/state/agent-overview/overview.json'
+```
+
+Unset → the tab shows a setup hint. Any tool can produce the file; the
+[`agent-overview`](https://github.com/kaiiserni/agent-overview) job is one.
+Rows are clickable (mouse) and navigable (`j`/`k` select, `Enter` jumps to the
+pane → window → session; `Ctrl+D`/`Ctrl+U` half-page scroll). Clicking falls
+back to the session/window when the pane id is gone.
+
+### File schema
+
+UTF-8 JSON, rewritten in place each update. `updated_at` is epoch seconds; all
+strings are plain text.
+
+```json
+{
+  "updated_at": 1781330413,
+  "tldr": ["short bullets for the header"],
+  "projects": [
+    {
+      "name": "my-project",
+      "cwd": "/abs/path/to/project",
+      "attention": true,
+      "doing": "what's happening right now",
+      "needs_from_you": "blocker text, or empty string",
+      "next_steps": ["suggestion 1", "suggestion 2"],
+      "active_md": ["optional verbatim notes"],
+      "panes": [
+        {
+          "pane_id": "%123",
+          "target": "session:window.pane",
+          "agent": "claude",
+          "status": "running",
+          "age_minutes": 12,
+          "summary": "one-line of what this pane is doing"
+        }
+      ]
+    }
+  ],
+  "idle": [
+    { "pane_id": "%99", "target": "session:window.pane", "project": "name", "task": "what it was doing" }
+  ]
+}
+```
+
+Field notes: `attention: true` sorts a project to the top and flags it. `pane_id`
+(`%N`) is the tmux pane id used for click/Enter navigation; `target` is the
+`session:window.pane` fallback. Unknown extra fields are ignored, so producers
+can add their own.
+
 ## Notifications
 
 A background daemon can push a Google Chat message whenever a pane

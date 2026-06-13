@@ -45,9 +45,20 @@ pub struct Overview {
     pub idle: Vec<OverviewIdle>,
 }
 
-pub fn overview_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_default();
-    PathBuf::from(home).join(".local/state/agent-overview/overview.json")
+/// Path to the overview JSON, from the `@dashboard_overview_file` tmux option.
+/// `None` when unset — the dashboard has no built-in producer or default path.
+pub fn overview_path() -> Option<PathBuf> {
+    let raw = crate::tmux::get_option(crate::tmux::DASHBOARD_OVERVIEW_FILE)?;
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let expanded = if let Some(rest) = raw.strip_prefix("~/") {
+        PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(rest)
+    } else {
+        PathBuf::from(raw)
+    };
+    Some(expanded)
 }
 
 fn str_vec(val: &serde_json::Value, key: &str) -> Vec<String> {
@@ -57,8 +68,15 @@ fn str_vec(val: &serde_json::Value, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Whether the Overview tab is configured (the option is set), regardless of
+/// whether the file currently parses. Lets the UI tell "not configured" apart
+/// from "configured but no data yet".
+pub fn is_configured() -> bool {
+    overview_path().is_some()
+}
+
 pub fn load() -> Option<Overview> {
-    parse(&std::fs::read_to_string(overview_path()).ok()?)
+    parse(&std::fs::read_to_string(overview_path()?).ok()?)
 }
 
 pub fn parse(content: &str) -> Option<Overview> {

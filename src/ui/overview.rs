@@ -69,11 +69,17 @@ pub fn draw_overview(frame: &mut Frame, state: &mut AppState, area: Rect) {
     state.layout.overview_view_height = area.height as usize;
 
     let Some(overview) = state.overview.clone() else {
-        let msg = Paragraph::new(Line::from(Span::styled(
-            "No overview yet — the agent-overview job hasn't produced output.",
+        let msg = if crate::overview::is_configured() {
+            "No overview data yet at the configured @dashboard_overview_file."
+        } else {
+            "Overview tab not configured. Set the tmux option @dashboard_overview_file to a JSON overview file (see README) to enable it."
+        };
+        let para = Paragraph::new(Line::from(Span::styled(
+            msg,
             Style::default().fg(state.theme.text_inactive),
-        )));
-        frame.render_widget(msg, area);
+        )))
+        .wrap(ratatui::widgets::Wrap { trim: true });
+        frame.render_widget(para, area);
         state.layout.overview_total_lines = 1;
         return;
     };

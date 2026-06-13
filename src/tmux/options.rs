@@ -58,6 +58,12 @@ pub const DASHBOARD_RESPONDED_NEWEST_FIRST: &str = "@dashboard_responded_newest_
 /// reopens where you left it.
 pub const DASHBOARD_LAST_TAB: &str = "@dashboard_last_tab";
 
+/// Optional path to a JSON overview file that powers the Overview tab. The
+/// dashboard is just a consumer: any producer can write this file (the
+/// `agent-overview` job is one). Unset → the Overview tab shows a setup hint.
+/// A leading `~` is expanded to $HOME. See README for the file schema.
+pub const DASHBOARD_OVERVIEW_FILE: &str = "@dashboard_overview_file";
+
 /// Pane id the user was on when the popup last opened. Written on every
 /// dashboard-initiated jump (Enter / click / Space) so the `L` key can
 /// hop back to it. Survives binary restart as a tmux global option.
