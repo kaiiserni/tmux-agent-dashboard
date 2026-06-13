@@ -907,15 +907,38 @@ fn scroll_overview(state: &mut AppState, delta: isize) {
         .min(max);
 }
 
+fn move_overview_selection(state: &mut AppState, delta: isize) {
+    let n = state.layout.overview_anchors.len();
+    if n == 0 {
+        return;
+    }
+    let cur = state.overview_selected.min(n - 1) as isize;
+    state.overview_selected = cur.saturating_add(delta).clamp(0, n as isize - 1) as usize;
+    // The renderer scrolls the selection back into view next frame.
+}
+
 fn handle_dashboard_overview_key(state: &mut AppState, code: KeyCode) -> bool {
     let page = state.layout.overview_view_height.saturating_sub(1).max(1) as isize;
     match code {
-        KeyCode::Char('j') | KeyCode::Down => scroll_overview(state, 1),
-        KeyCode::Char('k') | KeyCode::Up => scroll_overview(state, -1),
+        // j/k walk the navigable pane rows (selection); PgUp/PgDn free-scroll.
+        KeyCode::Char('j') | KeyCode::Down => move_overview_selection(state, 1),
+        KeyCode::Char('k') | KeyCode::Up => move_overview_selection(state, -1),
         KeyCode::PageDown => scroll_overview(state, page),
         KeyCode::PageUp => scroll_overview(state, -page),
-        KeyCode::Char('g') | KeyCode::Home => state.overview_scroll = 0,
-        KeyCode::Char('G') | KeyCode::End => scroll_overview(state, isize::MAX / 2),
+        KeyCode::Char('g') | KeyCode::Home => {
+            state.overview_scroll = 0;
+            state.overview_selected = 0;
+        }
+        KeyCode::Char('G') | KeyCode::End => {
+            scroll_overview(state, isize::MAX / 2);
+            state.overview_selected = state.layout.overview_anchors.len().saturating_sub(1);
+        }
+        KeyCode::Enter => {
+            if let Some(anchor) = state.layout.overview_anchors.get(state.overview_selected).cloned()
+            {
+                jump_to_overview_target(state, &anchor.pane_id, &anchor.target);
+            }
+        }
         _ => return false,
     }
     true

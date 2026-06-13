@@ -7,8 +7,8 @@ mod refresh;
 
 pub use focus::FocusState;
 pub use layout::{
-    FrameLayout, HeaderAction, HeaderTarget, OverviewTarget, SummarySectionRect, SummaryTarget,
-    TileTarget,
+    FrameLayout, HeaderAction, HeaderTarget, OverviewAnchor, OverviewTarget, SummarySectionRect,
+    SummaryTarget, TileTarget,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -123,6 +123,8 @@ pub struct AppState {
     pub overview: Option<crate::overview::Overview>,
     /// Scroll offset (rows) of the Overview tab.
     pub overview_scroll: usize,
+    /// Keyboard selection in the Overview tab: index into layout.overview_anchors.
+    pub overview_selected: usize,
 }
 
 impl AppState {
@@ -168,6 +170,7 @@ impl AppState {
             last_activity: std::collections::HashMap::new(),
             overview: crate::overview::load(),
             overview_scroll: 0,
+            overview_selected: 0,
         }
     }
 }

@@ -26,8 +26,11 @@ pub struct FrameLayout {
     /// Clickable header items (title bar of the outer block). Each entry
     /// is one action keyword and the x-range it occupies on the border row.
     pub header_targets: Vec<HeaderTarget>,
-    /// Clickable pane rows in the Overview tab (visible portion only).
+    /// Clickable pane rows in the Overview tab (visible portion only) — for mouse.
     pub overview_targets: Vec<OverviewTarget>,
+    /// All navigable rows in the Overview tab (full list, with absolute row
+    /// index) — for keyboard j/k selection and Enter-to-jump.
+    pub overview_anchors: Vec<OverviewAnchor>,
     /// Total rendered line count of the Overview tab, for scroll clamping.
     pub overview_total_lines: usize,
     /// Inner height of the Overview tab viewport, for page-scroll steps.
@@ -40,6 +43,14 @@ pub struct OverviewTarget {
     pub pane_id: String,
     /// `session:window.pane` from the overview snapshot — fallback when
     /// the pane id has died since the snapshot was taken.
+    pub target: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct OverviewAnchor {
+    /// Absolute row index in the full rendered row list (pre-scroll).
+    pub row: usize,
+    pub pane_id: String,
     pub target: String,
 }
 

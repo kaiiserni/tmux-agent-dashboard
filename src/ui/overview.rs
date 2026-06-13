@@ -65,6 +65,7 @@ fn status_color(state: &AppState, status: &str) -> ratatui::style::Color {
 
 pub fn draw_overview(frame: &mut Frame, state: &mut AppState, area: Rect) {
     state.layout.overview_targets = Vec::new();
+    state.layout.overview_anchors = Vec::new();
     state.layout.overview_view_height = area.height as usize;
 
     let Some(overview) = state.overview.clone() else {
@@ -80,22 +81,56 @@ pub fn draw_overview(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let width = area.width as usize;
     let rows = build_rows(state, &overview, width);
 
+    // All navigable rows (full list, absolute index) — for keyboard nav.
+    for (idx, row) in rows.iter().enumerate() {
+        if let Some((pane_id, target)) = &row.link {
+            state.layout.overview_anchors.push(crate::state::OverviewAnchor {
+                row: idx,
+                pane_id: pane_id.clone(),
+                target: target.clone(),
+            });
+        }
+    }
+    let anchors = &state.layout.overview_anchors;
+    if !anchors.is_empty() && state.overview_selected >= anchors.len() {
+        state.overview_selected = anchors.len() - 1;
+    }
+    let selected_row = anchors.get(state.overview_selected).map(|a| a.row);
+
     state.layout.overview_total_lines = rows.len();
-    let max_scroll = rows.len().saturating_sub(area.height as usize);
+    let height = area.height as usize;
+    let max_scroll = rows.len().saturating_sub(height);
+    // Keep the keyboard selection in view.
+    if let Some(sel) = selected_row {
+        if sel < state.overview_scroll {
+            state.overview_scroll = sel;
+        } else if sel >= state.overview_scroll + height {
+            state.overview_scroll = sel + 1 - height;
+        }
+    }
     if state.overview_scroll > max_scroll {
         state.overview_scroll = max_scroll;
     }
     let scroll = state.overview_scroll;
 
+    let sel_style = Style::default().bg(state.theme.selection_bg);
     let visible: Vec<Line> = rows
         .iter()
+        .enumerate()
         .skip(scroll)
-        .take(area.height as usize)
-        .map(|r| r.line.clone())
+        .take(height)
+        .map(|(idx, r)| {
+            let line = r.line.clone();
+            if Some(idx) == selected_row {
+                line.patch_style(sel_style)
+            } else {
+                line
+            }
+        })
         .collect();
 
-    // Register click targets for the visible pane rows.
-    for (offset, row) in rows.iter().skip(scroll).take(area.height as usize).enumerate() {
+    // Register click targets for the visible pane rows (mouse).
+    for (offset, row) in rows.iter().skip(scroll).take(height).enumerate() {
         if let Some((pane_id, target)) = &row.link {
             state.layout.overview_targets.push(OverviewTarget {
                 rect: Rect {
