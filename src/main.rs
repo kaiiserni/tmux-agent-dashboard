@@ -14,6 +14,7 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use tmux_agent_dashboard::{
     app, cli,
     cli::hook,
+    navigate,
     pending::{self, PendingEntry, Priority},
     tmux,
 };
@@ -63,6 +64,9 @@ fn main() -> io::Result<()> {
         }
         Some("back") => {
             return cmd_back();
+        }
+        Some("jump") => {
+            return cli::jump::cmd_jump();
         }
         Some("mark") => {
             return cmd_mark();
@@ -136,6 +140,8 @@ fn cmd_seen(args: &[String]) -> io::Result<()> {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     tmux::set_pane_option(&pane, tmux::PANE_LAST_SEEN_AT, &now.to_string());
+    // Focusing a pane marks it seen → refresh so it leaves the bar now.
+    tmux::refresh_status();
     Ok(())
 }
 
@@ -270,11 +276,6 @@ fn visible_width(s: &str) -> usize {
 // Switches the tmux client to the highest-priority pending pane. Same
 // heuristic as `status-line` so the bottom bar and `prefix + n` agree.
 
-// Global option keys used to record the most recent `next` jump so
-// `back` can undo it.
-const JUMP_FROM: &str = "@dashboard_jump_from";
-const JUMP_TO: &str = "@dashboard_jump_to";
-
 fn cmd_next() -> io::Result<()> {
     // Marked Unread is a user-curated parking lot, not an urgency
     // signal — don't surface it via `prefix + n`. It stays visible in
@@ -283,28 +284,12 @@ fn cmd_next() -> io::Result<()> {
         .into_iter()
         .filter(|e| e.priority != Priority::MarkedUnread)
         .collect();
-    let target = match entries.first() {
-        Some(t) => t,
+    match entries.first() {
+        Some(target) => navigate::jump_to(&target.pane_id),
         None => {
             let _ = tmux::run_tmux(&["display-message", "No pending agents"]);
-            return Ok(());
         }
-    };
-
-    let from = tmux::run_tmux(&["display-message", "-p", "#{pane_id}"])
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default();
-    if !from.is_empty() && from != target.pane_id {
-        let _ = tmux::run_tmux(&["set", "-g", JUMP_FROM, &from]);
-        let _ = tmux::run_tmux(&["set", "-g", JUMP_TO, &target.pane_id]);
     }
-
-    tmux::select_pane(&target.pane_id);
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    tmux::set_pane_option(&target.pane_id, tmux::PANE_LAST_SEEN_AT, &now.to_string());
     Ok(())
 }
 
@@ -326,28 +311,14 @@ fn cmd_goto(args: &[String]) -> io::Result<()> {
     if !is_pane_id(target) {
         return Ok(());
     }
-
-    let from = tmux::run_tmux(&["display-message", "-p", "#{pane_id}"])
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default();
-    if !from.is_empty() && from != target {
-        let _ = tmux::run_tmux(&["set", "-g", JUMP_FROM, &from]);
-        let _ = tmux::run_tmux(&["set", "-g", JUMP_TO, target]);
-    }
-
-    tmux::select_pane(target);
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    tmux::set_pane_option(target, tmux::PANE_LAST_SEEN_AT, &now.to_string());
+    navigate::jump_to(target);
     Ok(())
 }
 
 /// Undo the most recent `next` jump: switch back to the pane we came
 /// from. Marking is no longer part of this — use `mark` for that.
 fn cmd_back() -> io::Result<()> {
-    let from = tmux::run_tmux(&["show", "-gv", JUMP_FROM])
+    let from = tmux::run_tmux(&["show", "-gv", navigate::JUMP_FROM])
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
     if from.is_empty() {
@@ -355,8 +326,8 @@ fn cmd_back() -> io::Result<()> {
         return Ok(());
     }
     tmux::select_pane(&from);
-    let _ = tmux::run_tmux(&["set", "-gu", JUMP_FROM]);
-    let _ = tmux::run_tmux(&["set", "-gu", JUMP_TO]);
+    let _ = tmux::run_tmux(&["set", "-gu", navigate::JUMP_FROM]);
+    let _ = tmux::run_tmux(&["set", "-gu", navigate::JUMP_TO]);
     Ok(())
 }
 

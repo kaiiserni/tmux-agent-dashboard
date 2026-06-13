@@ -33,6 +33,14 @@ pub fn set_pane_option(pane_id: &str, key: &str, value: &str) {
     let _ = run_tmux(&["set", "-t", pane_id, "-p", key, value]);
 }
 
+/// Force an immediate status-line redraw so the `#()` jobs (including our
+/// `status-line`) re-run now instead of on the next `status-interval`
+/// tick. Used after a pane is marked seen so it drops off the pending bar
+/// at once rather than lingering up to 15s.
+pub fn refresh_status() {
+    let _ = run_tmux(&["refresh-client", "-S"]);
+}
+
 pub fn unset_pane_option(pane_id: &str, key: &str) {
     let _ = run_tmux(&["set", "-t", pane_id, "-pu", key]);
 }

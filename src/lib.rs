@@ -5,6 +5,7 @@ pub mod bg;
 pub mod cli;
 pub mod event;
 pub mod group;
+pub mod navigate;
 pub mod overview;
 pub mod pending;
 pub mod process;

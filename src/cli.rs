@@ -4,6 +4,7 @@
 
 pub mod hook;
 pub mod install_hooks;
+pub mod jump;
 pub mod notify;
 
 use std::io::Read;

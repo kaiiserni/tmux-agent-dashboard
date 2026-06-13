@@ -50,7 +50,7 @@ run-shell '~/projects/tmux-agent-dashboard/tmux-agent-dashboard.tmux'
 | Key | Action |
 |---|---|
 | `prefix + ñ` | Open dashboard popup |
-| `Tab` | Switch between Summary and Tiles |
+| `Tab` | Cycle Tiles / Summary / Overview |
 | `s` | Toggle attention-first sort |
 | `p` | Toggle redact mode (hide ages/timestamps + mask text, for screenshots) |
 | `j` / `k` / `↓` / `↑` | Move row selection (auto-scrolls across lists) |
@@ -68,12 +68,41 @@ The header items are clickable too: clicking one runs the matching key (and clic
 Each tile in the Tiles view also shows a context-preview line: the pane's
 most recent activity-log entry (tool, label, and age). Hidden in redact mode.
 
+### Jump picker
+
+The `jump` subcommand opens a small popup over the pending agents so you
+can hop to one without the full dashboard. Bind it to a key, e.g.:
+
+```tmux
+bind -N "agents: jump picker" n display-popup -E -w 76 -h 18 \
+  '~/projects/tmux-agent-dashboard/bin/tmux-agent-dashboard jump'
+```
+
+It lists the same panes as the status bar, numbered, with a short
+countdown. Leave it alone and it jumps to the most urgent pane (the plain
+`next` behaviour); press a number, or navigate and confirm, to pick
+another. The first navigation key cancels the countdown.
+
+| Key | Action |
+|---|---|
+| `1`–`9` | Jump to that numbered pane |
+| `j` / `k` / `↓` / `↑` | Move selection (cancels the countdown) |
+| `g` / `G` | First / last |
+| `Enter` | Jump to the highlighted pane |
+| `n` | Jump to the most urgent pane now |
+| `q` / `Esc` | Close without jumping |
+
+A single pending pane skips the popup and jumps straight there. The
+countdown defaults to 500ms (`@dashboard_jump_timeout_ms`).
+
 ## Configuration
 
 ```tmux
 set -g @dashboard_key    'ñ'      # default
 set -g @dashboard_width  '90%'    # default
 set -g @dashboard_height '85%'    # default
+
+set -g @dashboard_jump_timeout_ms '500'  # jump-picker countdown (ms); 0 = wait for a key
 ```
 
 The sidebar's `@sidebar_color_*` and `@sidebar_icon_*` options are
@@ -179,7 +208,10 @@ configured the daemon exits with a message on stderr.
   `/tmp/tmux-agent-activity*.log` for the recent activity feed
 - `seen <pane_id>` (bound to `after-select-pane`) writes
   `@pane_last_seen_at` so the dashboard can derive when you last
-  looked at a pane — the basis for the Responded heuristic
+  looked at a pane — the basis for the Responded heuristic. It also
+  forces a status-line redraw so a pane that just became seen drops off
+  the pending bar at once instead of lingering until the next
+  `status-interval` tick
 
 ### Pane state contract (`@pane_*`)
 

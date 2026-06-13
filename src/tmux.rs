@@ -4,8 +4,9 @@ mod query;
 pub mod types;
 
 pub use commands::{
-    display_message, get_all_global_options, get_pane_option_value, pane_exists, run_tmux,
-    select_pane, select_session_window, set_global_option, set_pane_option, unset_pane_option,
+    display_message, get_all_global_options, get_pane_option_value, pane_exists, refresh_status,
+    run_tmux, select_pane, select_session_window, set_global_option, set_pane_option,
+    unset_pane_option,
 };
 pub use options::{
     BG_CMD_PLACEHOLDER, DASHBOARD_JUMP_ORIGIN, DASHBOARD_LAST_TAB, DASHBOARD_OVERVIEW_FILE,
