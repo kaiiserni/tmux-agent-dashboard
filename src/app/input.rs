@@ -1,6 +1,6 @@
 use std::io;
 
-use crossterm::event::{Event, KeyCode, MouseButton, MouseEventKind};
+use crossterm::event::{Event, KeyCode, KeyModifiers, MouseButton, MouseEventKind};
 use ratatui::{Terminal, backend::CrosstermBackend};
 
 use crate::state::{AppState, DashboardTab, HeaderAction, SummarySection};
@@ -13,6 +13,23 @@ pub(super) fn handle_event(
     let needs_redraw = false;
 
     if let Event::Key(key) = &ev {
+        // Ctrl+D / Ctrl+U: half-page scroll in the Overview tab (Vim-style).
+        if state.dashboard_tab == DashboardTab::Overview
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+        {
+            let half = (state.layout.overview_view_height / 2).max(1) as isize;
+            match key.code {
+                KeyCode::Char('d') => {
+                    scroll_overview(state, half);
+                    return true;
+                }
+                KeyCode::Char('u') => {
+                    scroll_overview(state, -half);
+                    return true;
+                }
+                _ => {}
+            }
+        }
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => {
                 state.should_exit = true;
