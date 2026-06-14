@@ -11,6 +11,30 @@ pub fn pane_is_visible(pane: &PaneInfo) -> bool {
     !matches!(pane.status, PaneStatus::Idle) || pane.attention || pane.marked_unread_at.is_some()
 }
 
+/// Free-text haystack for the dashboard's `/` fuzzy filter: group name plus
+/// every label a pane might be recognised by, across both display modes.
+/// The agent vendor name is deliberately excluded — it's identical across
+/// most panes ("claude"), so it would match every short query ("cl").
+fn pane_haystack(name: &str, p: &PaneInfo, info: &PaneGitInfo) -> String {
+    let branch = info.branch.as_deref().unwrap_or("");
+    format!(
+        "{name} {} {} {} {} {} {} {}",
+        p.tmux_session_name,
+        p.session_name,
+        p.pane_name,
+        p.window_name,
+        p.worktree.branch,
+        p.worktree.name,
+        branch,
+    )
+}
+
+/// Whether a pane matches the active search query. Empty query matches all,
+/// so callers can pass the query unconditionally.
+pub fn pane_matches_search(name: &str, p: &PaneInfo, info: &PaneGitInfo, search: &str) -> bool {
+    search.is_empty() || crate::fuzzy::score(&pane_haystack(name, p, info), search).is_some()
+}
+
 /// Max age before a cached `PaneGitInfo` entry is re-resolved.
 /// Refresh fires every second; without this the dashboard would shell out
 /// to `git` for every pane on every tick.
@@ -44,36 +68,36 @@ pub struct RepoGroup {
 
 impl RepoGroup {
     /// Indices into `panes` rendered in the Tiles view under the current
-    /// filter. With `hide_idle`, pure-idle panes are dropped.
-    pub fn visible_pane_indices(&self, hide_idle: bool) -> Vec<usize> {
-        if hide_idle {
-            self.panes
-                .iter()
-                .enumerate()
-                .filter(|(_, (p, _))| pane_is_visible(p))
-                .map(|(i, _)| i)
-                .collect()
-        } else {
-            (0..self.panes.len()).collect()
-        }
+    /// filter. With `hide_idle`, pure-idle panes are dropped; a non-empty
+    /// `search` also drops panes that don't match the fuzzy query.
+    pub fn visible_pane_indices(&self, hide_idle: bool, search: &str) -> Vec<usize> {
+        self.panes
+            .iter()
+            .enumerate()
+            .filter(|(_, (p, info))| {
+                (!hide_idle || pane_is_visible(p))
+                    && pane_matches_search(&self.name, p, info, search)
+            })
+            .map(|(i, _)| i)
+            .collect()
     }
 
     /// Number of panes the Tiles view shows for this group.
-    pub fn visible_pane_count(&self, hide_idle: bool) -> usize {
-        if hide_idle {
-            self.panes.iter().filter(|(p, _)| pane_is_visible(p)).count()
-        } else {
-            self.panes.len()
-        }
+    pub fn visible_pane_count(&self, hide_idle: bool, search: &str) -> usize {
+        self.panes
+            .iter()
+            .filter(|(p, info)| {
+                (!hide_idle || pane_is_visible(p))
+                    && pane_matches_search(&self.name, p, info, search)
+            })
+            .count()
     }
 
     /// Whether this group has any pane the Tiles view would show.
-    pub fn has_visible_panes(&self, hide_idle: bool) -> bool {
-        if hide_idle {
-            self.panes.iter().any(|(p, _)| pane_is_visible(p))
-        } else {
-            !self.panes.is_empty()
-        }
+    pub fn has_visible_panes(&self, hide_idle: bool, search: &str) -> bool {
+        self.panes.iter().any(|(p, info)| {
+            (!hide_idle || pane_is_visible(p)) && pane_matches_search(&self.name, p, info, search)
+        })
     }
 }
 

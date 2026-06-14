@@ -30,9 +30,21 @@ pub(super) fn handle_event(
                 _ => {}
             }
         }
+        // Active `/` filter (all tabs): printable keys feed the query,
+        // navigation moves the highlight, most other keys suspended.
+        if state.search_active {
+            return handle_search_key(state, key);
+        }
+
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => {
                 state.should_exit = true;
+                return true;
+            }
+            KeyCode::Char('/') => {
+                state.search_active = true;
+                state.search_query.clear();
+                reset_search_selection(state);
                 return true;
             }
             KeyCode::Tab => {
@@ -482,12 +494,12 @@ pub fn ensure_expanded_group(state: &mut AppState) {
         let valid = state
             .repo_groups
             .iter()
-            .any(|g| g.key == key && g.has_visible_panes(hide_idle));
+            .any(|g| g.key == key && g.has_visible_panes(hide_idle, &state.search_query));
         if !valid {
             state.expanded_group = state
                 .repo_groups
                 .iter()
-                .find(|g| g.has_visible_panes(hide_idle))
+                .find(|g| g.has_visible_panes(hide_idle, &state.search_query))
                 .map(|g| g.key.clone());
         }
     }
@@ -534,7 +546,7 @@ fn switch_to_group(state: &mut AppState, g_idx: usize, to_last: bool) {
     }
     let hide_idle = state.tiles_hide_idle;
     let group = &state.repo_groups[g_idx];
-    let visible_count = group.visible_pane_count(hide_idle);
+    let visible_count = group.visible_pane_count(hide_idle, &state.search_query);
     if visible_count == 0 {
         return;
     }
@@ -545,15 +557,97 @@ fn switch_to_group(state: &mut AppState, g_idx: usize, to_last: bool) {
     state.tile_scroll_group = g_idx;
 }
 
+/// Half the active search viewport, for Ctrl+u/d. The render sets
+/// `search_view_height` each frame, so this scales with the popup size.
+fn half_page(state: &AppState) -> isize {
+    (state.layout.search_view_height / 2).max(1) as isize
+}
+
+/// Key handling while the `/` filter is active (any tab).
+fn handle_search_key(state: &mut AppState, key: &crossterm::event::KeyEvent) -> bool {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    match key.code {
+        KeyCode::Esc => {
+            state.search_active = false;
+            state.search_query.clear();
+            reset_search_selection(state);
+        }
+        KeyCode::Enter => match state.dashboard_tab {
+            DashboardTab::Tiles => {
+                if let Some(t) = state.layout.tile_targets.get(state.tile_selected).cloned() {
+                    jump_to_pane(state, &t.pane_id);
+                }
+            }
+            DashboardTab::Summary => {
+                if let Some(t) = state.layout.summary_targets.get(state.summary_selected).cloned() {
+                    jump_to_pane(state, &t.pane_id);
+                }
+            }
+            DashboardTab::Overview => {
+                if let Some(a) = state
+                    .layout
+                    .overview_anchors
+                    .get(state.overview_selected)
+                    .cloned()
+                {
+                    jump_to_overview_target(state, &a.pane_id, &a.target);
+                }
+            }
+        },
+        KeyCode::Backspace => {
+            state.search_query.pop();
+            reset_search_selection(state);
+        }
+        KeyCode::Down => search_move(state, 1),
+        KeyCode::Up => search_move(state, -1),
+        KeyCode::Char('n') | KeyCode::Char('j') if ctrl => search_move(state, 1),
+        KeyCode::Char('p') | KeyCode::Char('k') if ctrl => search_move(state, -1),
+        KeyCode::Char('d') if ctrl => search_move(state, half_page(state)),
+        KeyCode::Char('u') if ctrl => search_move(state, -half_page(state)),
+        KeyCode::Char(c) if !ctrl && !c.is_control() => {
+            state.search_query.push(c);
+            reset_search_selection(state);
+        }
+        _ => {}
+    }
+    true
+}
+
+fn reset_search_selection(state: &mut AppState) {
+    state.tile_selected = 0;
+    state.summary_selected = 0;
+    state.overview_selected = 0;
+}
+
+fn search_move(state: &mut AppState, delta: isize) {
+    let (cur, len) = match state.dashboard_tab {
+        DashboardTab::Tiles => (state.tile_selected, state.layout.tile_targets.len()),
+        DashboardTab::Summary => (state.summary_selected, state.layout.summary_targets.len()),
+        DashboardTab::Overview => {
+            move_overview_selection(state, delta);
+            return;
+        }
+    };
+    if len == 0 {
+        return;
+    }
+    let next = (cur as isize + delta).clamp(0, len as isize - 1) as usize;
+    match state.dashboard_tab {
+        DashboardTab::Tiles => state.tile_selected = next,
+        DashboardTab::Summary => state.summary_selected = next,
+        DashboardTab::Overview => {}
+    }
+}
+
 fn next_nonempty_group(state: &AppState, from: usize, forward: bool) -> Option<usize> {
     let hide_idle = state.tiles_hide_idle;
     if forward {
         ((from + 1)..state.repo_groups.len())
-            .find(|&i| state.repo_groups[i].has_visible_panes(hide_idle))
+            .find(|&i| state.repo_groups[i].has_visible_panes(hide_idle, &state.search_query))
     } else {
         (0..from)
             .rev()
-            .find(|&i| state.repo_groups[i].has_visible_panes(hide_idle))
+            .find(|&i| state.repo_groups[i].has_visible_panes(hide_idle, &state.search_query))
     }
 }
 
@@ -642,6 +736,11 @@ fn run_header_action(state: &mut AppState, action: HeaderAction) {
         }
         HeaderAction::ToggleFold => {
             toggle_fold_all(state);
+        }
+        HeaderAction::Search => {
+            state.search_active = true;
+            state.search_query.clear();
+            reset_search_selection(state);
         }
         HeaderAction::ClearSelected => {
             if let Some(pane_id) = selected_pane_id(state) {
@@ -901,9 +1000,25 @@ fn find_overview_pane_at(state: &AppState, row: u16, col: u16) -> Option<(String
 /// the pane when it still exists, otherwise fall back to the snapshot's
 /// `session:window` (and stay open if even the session is gone).
 fn jump_to_overview_target(state: &mut AppState, pane_id: &str, target: &str) {
-    if crate::tmux::pane_exists(pane_id) {
+    if !pane_id.is_empty() && crate::tmux::pane_exists(pane_id) {
         jump_to_pane(state, pane_id);
         return;
+    }
+    // Name fallback (project with no tracked agent pane): match the project
+    // name against a live agent pane's tmux session or repo group, jump there.
+    let needle = target.to_lowercase();
+    if !needle.is_empty() {
+        let hit = state.repo_groups.iter().find_map(|g| {
+            g.panes.iter().find_map(|(p, _)| {
+                (p.tmux_session_name.to_lowercase().contains(&needle)
+                    || g.name.to_lowercase().contains(&needle))
+                .then(|| p.pane_id.clone())
+            })
+        });
+        if let Some(id) = hit {
+            jump_to_pane(state, &id);
+            return;
+        }
     }
     if crate::tmux::select_session_window(target) {
         if !state.tmux_pane.is_empty() {

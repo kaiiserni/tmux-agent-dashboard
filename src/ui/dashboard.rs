@@ -43,11 +43,41 @@ pub fn draw_dashboard(frame: &mut Frame, state: &mut AppState) {
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
 
+    // When the `/` filter is active, carve a one-line search bar off the
+    // bottom and render the view in the rest.
+    let content = if state.search_active {
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1), Constraint::Length(1)])
+            .split(inner);
+        draw_search_bar(frame, state, rows[1]);
+        state.layout.search_view_height = rows[0].height as usize;
+        rows[0]
+    } else {
+        inner
+    };
+
     match state.dashboard_tab {
-        DashboardTab::Summary => draw_summary(frame, state, inner),
-        DashboardTab::Tiles => draw_tiles(frame, state, inner),
-        DashboardTab::Overview => super::overview::draw_overview(frame, state, inner),
+        DashboardTab::Summary => draw_summary(frame, state, content),
+        DashboardTab::Tiles => draw_tiles(frame, state, content),
+        DashboardTab::Overview => super::overview::draw_overview(frame, state, content),
     }
+}
+
+fn draw_search_bar(frame: &mut Frame, state: &AppState, area: Rect) {
+    let line = Line::from(vec![
+        Span::styled("/", Style::default().fg(state.theme.accent)),
+        Span::styled(
+            state.search_query.clone(),
+            Style::default().fg(state.theme.text_active),
+        ),
+        Span::styled("▏", Style::default().fg(state.theme.accent)),
+        Span::styled(
+            "   esc cancel · ↵ jump · ^j/^k move · ^d/^u page",
+            Style::default().fg(state.theme.text_muted),
+        ),
+    ]);
+    frame.render_widget(Paragraph::new(line), area);
 }
 
 /// One header segment: either plain chrome (not clickable) or an action
@@ -128,6 +158,11 @@ fn build_header(
         segs.push(HeaderSeg::Chrome("· ".to_string()));
     }
     segs.push(HeaderSeg::Action {
+        text: "/: search ".to_string(),
+        action: HeaderAction::Search,
+    });
+    segs.push(HeaderSeg::Chrome("· ".to_string()));
+    segs.push(HeaderSeg::Action {
         text: names_label.to_string(),
         action: HeaderAction::ToggleNames,
     });
@@ -199,6 +234,13 @@ fn build_header(
 
 fn draw_summary(frame: &mut Frame, state: &mut AppState, area: Rect) {
     state.layout.summary_targets.clear();
+
+    // Search mode: a single full-width list across all categories, light
+    // section titles, empty categories omitted. No counters/activity.
+    if state.search_active {
+        draw_summary_search(frame, state, area);
+        return;
+    }
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -405,9 +447,330 @@ fn sorted_summary_panes(state: &AppState) -> Vec<(String, &PaneInfo, &crate::gro
                 .iter()
                 .map(move |(p, info)| (g.name.clone(), p, info))
         })
+        .filter(|(name, p, info)| {
+            crate::group::pane_matches_search(name, p, info, &state.search_query)
+        })
         .collect();
     v.sort_by(|a, b| pane_priority_key(a.1).cmp(&pane_priority_key(b.1)));
     v
+}
+
+/// Rows for one Summary section (already filtered by the active search
+/// query, via `sorted_summary_panes`). Single source shared by the quadrant
+/// sections and the full-width search list.
+fn summary_section_rows(state: &AppState, section: SummarySection) -> Vec<SummaryRow> {
+    let panes = sorted_summary_panes(state);
+    let labels = |p: &PaneInfo, info: &crate::group::PaneGitInfo, g: &str| {
+        friendly_row_labels(p, info, g, state)
+    };
+    let last_entry_reason = |p: &PaneInfo, fallback: &str| -> String {
+        if !p.prompt.is_empty() {
+            return p.prompt.clone();
+        }
+        if let Some(e) = crate::activity::read_activity_log(&p.pane_id, 1).into_iter().next() {
+            if e.label.is_empty() {
+                format!("{} {}", e.timestamp, e.tool)
+            } else {
+                format!("{} {} {}", e.timestamp, e.tool, e.label)
+            }
+        } else {
+            fallback.to_string()
+        }
+    };
+
+    match section {
+        SummarySection::Attention => panes
+            .into_iter()
+            .filter(|(_, p, _)| p.attention)
+            .map(|(g, p, info)| {
+                let (repo, branch) = labels(p, info, &g);
+                SummaryRow {
+                    status_icon: state.icons.status_icon(&p.status).to_string(),
+                    status_color: state.theme.badge_danger,
+                    agent_glyph: p.agent.glyph(),
+                    agent_color: agent_color(state, &p.agent),
+                    repo,
+                    branch,
+                    reason: if !p.wait_reason.is_empty() {
+                        p.wait_reason.clone()
+                    } else {
+                        "notification".into()
+                    },
+                    age: pane_age(p),
+                    pane_id: p.pane_id.clone(),
+                }
+            })
+            .collect(),
+        SummarySection::Waiting => panes
+            .into_iter()
+            .filter(|(_, p, _)| matches!(p.status, PaneStatus::Waiting | PaneStatus::Error))
+            .map(|(g, p, info)| {
+                let (repo, branch) = labels(p, info, &g);
+                SummaryRow {
+                    status_icon: state.icons.status_icon(&p.status).to_string(),
+                    status_color: if matches!(p.status, PaneStatus::Error) {
+                        state.theme.status_error
+                    } else {
+                        state.theme.status_waiting
+                    },
+                    agent_glyph: p.agent.glyph(),
+                    agent_color: agent_color(state, &p.agent),
+                    repo,
+                    branch,
+                    reason: if !p.wait_reason.is_empty() {
+                        p.wait_reason.clone()
+                    } else if matches!(p.status, PaneStatus::Error) {
+                        "error".into()
+                    } else {
+                        "waiting".into()
+                    },
+                    age: pane_age(p),
+                    pane_id: p.pane_id.clone(),
+                }
+            })
+            .collect(),
+        SummarySection::Running => panes
+            .into_iter()
+            .filter(|(_, p, _)| matches!(p.status, PaneStatus::Running | PaneStatus::Background))
+            .map(|(g, p, info)| {
+                let (repo, branch) = labels(p, info, &g);
+                SummaryRow {
+                    status_icon: state.icons.status_icon(&p.status).to_string(),
+                    status_color: state.theme.status_running,
+                    agent_glyph: p.agent.glyph(),
+                    agent_color: agent_color(state, &p.agent),
+                    repo,
+                    branch,
+                    reason: if !p.prompt.is_empty() {
+                        p.prompt.clone()
+                    } else if !p.current_command.is_empty() {
+                        p.current_command.clone()
+                    } else if matches!(p.status, PaneStatus::Background) {
+                        "background".into()
+                    } else {
+                        "running".into()
+                    },
+                    age: if matches!(p.status, PaneStatus::Background) {
+                        None
+                    } else {
+                        pane_age(p)
+                    },
+                    pane_id: p.pane_id.clone(),
+                }
+            })
+            .collect(),
+        SummarySection::Responded => {
+            let mut rows: Vec<(SummaryRow, std::time::SystemTime)> = panes
+                .into_iter()
+                .filter(|(_, p, _)| matches!(p.status, PaneStatus::Idle) && pane_is_unseen(p))
+                .map(|(g, p, info)| {
+                    let (repo, branch) = labels(p, info, &g);
+                    let mtime =
+                        crate::activity::log_mtime(&p.pane_id).unwrap_or(std::time::UNIX_EPOCH);
+                    let row = SummaryRow {
+                        status_icon: "↩".to_string(),
+                        status_color: state.theme.badge_auto,
+                        agent_glyph: p.agent.glyph(),
+                        agent_color: agent_color(state, &p.agent),
+                        repo,
+                        branch,
+                        reason: last_entry_reason(p, "responded"),
+                        age: pane_age(p),
+                        pane_id: p.pane_id.clone(),
+                    };
+                    (row, mtime)
+                })
+                .collect();
+            if state.responded_newest_first {
+                rows.sort_by(|a, b| b.1.cmp(&a.1));
+            } else {
+                rows.sort_by(|a, b| a.1.cmp(&b.1));
+            }
+            rows.into_iter().map(|(r, _)| r).collect()
+        }
+        SummarySection::MarkedUnread => {
+            let mut rows: Vec<(SummaryRow, u64)> = panes
+                .into_iter()
+                .filter(|(_, p, _)| {
+                    matches!(p.status, PaneStatus::Idle)
+                        && !p.attention
+                        && p.marked_unread_at.is_some()
+                        && !crate::pending::pane_is_unseen(p)
+                })
+                .map(|(g, p, info)| {
+                    let (repo, branch) = labels(p, info, &g);
+                    let row = SummaryRow {
+                        status_icon: "📌".to_string(),
+                        status_color: state.theme.badge_plan,
+                        agent_glyph: p.agent.glyph(),
+                        agent_color: agent_color(state, &p.agent),
+                        repo,
+                        branch,
+                        reason: if !p.prompt.is_empty() {
+                            p.prompt.clone()
+                        } else {
+                            "pinned".into()
+                        },
+                        age: None,
+                        pane_id: p.pane_id.clone(),
+                    };
+                    (row, p.marked_unread_at.unwrap_or(0))
+                })
+                .collect();
+            rows.sort_by(|a, b| b.1.cmp(&a.1));
+            rows.into_iter().map(|(r, _)| r).collect()
+        }
+        SummarySection::Idle => {
+            let mut rows: Vec<(SummaryRow, std::time::SystemTime)> = panes
+                .into_iter()
+                .filter(|(_, p, _)| {
+                    matches!(p.status, PaneStatus::Idle)
+                        && !pane_is_unseen(p)
+                        && p.marked_unread_at.is_none()
+                })
+                .map(|(g, p, info)| {
+                    let (repo, branch) = labels(p, info, &g);
+                    let mtime =
+                        crate::activity::log_mtime(&p.pane_id).unwrap_or(std::time::UNIX_EPOCH);
+                    let row = SummaryRow {
+                        status_icon: state.icons.status_icon(&p.status).to_string(),
+                        status_color: state.theme.status_idle,
+                        agent_glyph: p.agent.glyph(),
+                        agent_color: agent_color(state, &p.agent),
+                        repo,
+                        branch,
+                        reason: last_entry_reason(p, "idle"),
+                        age: pane_age(p),
+                        pane_id: p.pane_id.clone(),
+                    };
+                    (row, mtime)
+                })
+                .collect();
+            rows.sort_by(|a, b| b.1.cmp(&a.1));
+            rows.into_iter().map(|(r, _)| r).collect()
+        }
+    }
+}
+
+/// Summary search view: one full-width scrollable list over every
+/// non-empty category, each preceded by a light title. `summary_selected`
+/// indexes the flat row order (every row gets a target so navigation and
+/// scroll span the whole list).
+fn draw_summary_search(frame: &mut Frame, state: &mut AppState, area: Rect) {
+    state.layout.summary_targets.clear();
+
+    const ORDER: [SummarySection; 6] = [
+        SummarySection::Attention,
+        SummarySection::Waiting,
+        SummarySection::Responded,
+        SummarySection::Running,
+        SummarySection::MarkedUnread,
+        SummarySection::Idle,
+    ];
+    let sections: Vec<(SummarySection, Vec<SummaryRow>)> = ORDER
+        .iter()
+        .map(|&s| (s, summary_section_rows(state, s)))
+        .filter(|(_, rows)| !rows.is_empty())
+        .collect();
+
+    let total_rows: usize = sections.iter().map(|(_, r)| r.len()).sum();
+    if total_rows == 0 {
+        let msg = if state.search_query.is_empty() {
+            "  type to filter".to_string()
+        } else {
+            format!("  no matches for \"{}\"", state.search_query)
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                msg,
+                Style::default().fg(state.theme.text_muted),
+            ))),
+            area,
+        );
+        return;
+    }
+    if state.summary_selected >= total_rows {
+        state.summary_selected = total_rows - 1;
+    }
+
+    // Flatten to visual lines (section titles + rows), noting the visual
+    // index of the selected row so we can scroll it into view.
+    enum Vis<'a> {
+        Header(SummarySection),
+        Row(SummarySection, &'a SummaryRow),
+    }
+    let mut vis: Vec<Vis> = Vec::new();
+    let mut sel_visual = 0usize;
+    let mut counter = 0usize;
+    for (s, rows) in &sections {
+        vis.push(Vis::Header(*s));
+        for row in rows {
+            if counter == state.summary_selected {
+                sel_visual = vis.len();
+            }
+            vis.push(Vis::Row(*s, row));
+            counter += 1;
+        }
+    }
+
+    let height = area.height as usize;
+    let max_scroll = vis.len().saturating_sub(height);
+    let scroll = if sel_visual >= height {
+        (sel_visual + 1 - height).min(max_scroll)
+    } else {
+        0
+    };
+
+    let width = area.width as usize;
+    let mut global_row = 0usize;
+    for (i, item) in vis.iter().enumerate() {
+        let on_screen = i >= scroll && i < scroll + height;
+        let y = area.y + i.saturating_sub(scroll) as u16;
+        match item {
+            Vis::Header(s) => {
+                if on_screen {
+                    let rect = Rect { x: area.x, y, width: area.width, height: 1 };
+                    let line = Line::from(Span::styled(
+                        format!(" {} ", title_case(section_title(*s))),
+                        Style::default()
+                            .fg(state.theme.section_title)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                    frame.render_widget(Paragraph::new(line), rect);
+                }
+            }
+            Vis::Row(s, row) => {
+                let selected = global_row == state.summary_selected;
+                let rect = if on_screen {
+                    Rect { x: area.x, y, width: area.width, height: 1 }
+                } else {
+                    Rect { x: area.x, y: area.y, width: 0, height: 0 }
+                };
+                state.layout.summary_targets.push(crate::state::SummaryTarget {
+                    rect,
+                    pane_id: row.pane_id.clone(),
+                    section: *s,
+                });
+                if on_screen {
+                    let line = summary_row_line(state, row, selected, width);
+                    frame.render_widget(Paragraph::new(line), rect);
+                }
+                global_row += 1;
+            }
+        }
+    }
+}
+
+/// Title shown above each section in the full-width search list.
+fn section_title(section: SummarySection) -> &'static str {
+    match section {
+        SummarySection::Attention => "needs attention",
+        SummarySection::Waiting => "waiting",
+        SummarySection::Responded => "responded",
+        SummarySection::Running => "running",
+        SummarySection::MarkedUnread => "marked unread",
+        SummarySection::Idle => "idle",
+    }
 }
 
 fn draw_attention(frame: &mut Frame, state: &mut AppState, area: Rect) {
@@ -415,29 +778,7 @@ fn draw_attention(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Collect attention-flagged panes (notification / permission_denied / teammate_idle).
-    let rows: Vec<SummaryRow> = sorted_summary_panes(state)
-        .into_iter()
-        .filter(|(_, p, _)| p.attention)
-        .map(|(group_name, p, info)| {
-            let (repo, branch) = friendly_row_labels(p, info, &group_name, state);
-            SummaryRow {
-                status_icon: state.icons.status_icon(&p.status).to_string(),
-                status_color: state.theme.badge_danger,
-                agent_glyph: p.agent.glyph(),
-                agent_color: agent_color(state, &p.agent),
-                repo,
-                branch,
-                reason: if !p.wait_reason.is_empty() {
-                    p.wait_reason.clone()
-                } else {
-                    "notification".into()
-                },
-                age: pane_age(p),
-                pane_id: p.pane_id.clone(),
-            }
-        })
-        .collect();
+    let rows = summary_section_rows(state, SummarySection::Attention);
 
     if rows.is_empty() {
         update_section_rect(state, SummarySection::Attention, inner, 0);
@@ -457,34 +798,7 @@ fn draw_waiting(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let rows: Vec<SummaryRow> = sorted_summary_panes(state)
-        .into_iter()
-        .filter(|(_, p, _)| matches!(p.status, PaneStatus::Waiting | PaneStatus::Error))
-        .map(|(group_name, p, info)| {
-            let (repo, branch) = friendly_row_labels(p, info, &group_name, state);
-            SummaryRow {
-                status_icon: state.icons.status_icon(&p.status).to_string(),
-                status_color: if matches!(p.status, PaneStatus::Error) {
-                    state.theme.status_error
-                } else {
-                    state.theme.status_waiting
-                },
-                agent_glyph: p.agent.glyph(),
-                agent_color: agent_color(state, &p.agent),
-                repo,
-                branch,
-                reason: if !p.wait_reason.is_empty() {
-                    p.wait_reason.clone()
-                } else if matches!(p.status, PaneStatus::Error) {
-                    "error".into()
-                } else {
-                    "waiting".into()
-                },
-                age: pane_age(p),
-                pane_id: p.pane_id.clone(),
-            }
-        })
-        .collect();
+    let rows = summary_section_rows(state, SummarySection::Waiting);
 
     if rows.is_empty() {
         update_section_rect(state, SummarySection::Waiting, inner, 0);
@@ -504,38 +818,7 @@ fn draw_running(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let rows: Vec<SummaryRow> = sorted_summary_panes(state)
-        .into_iter()
-        .filter(|(_, p, _)| matches!(p.status, PaneStatus::Running | PaneStatus::Background))
-        .map(|(group_name, p, info)| {
-            let (repo, branch) = friendly_row_labels(p, info, &group_name, state);
-            SummaryRow {
-                status_icon: state.icons.status_icon(&p.status).to_string(),
-                status_color: state.theme.status_running,
-                agent_glyph: p.agent.glyph(),
-                agent_color: agent_color(state, &p.agent),
-                repo,
-                branch,
-                reason: if !p.prompt.is_empty() {
-                    p.prompt.clone()
-                } else if !p.current_command.is_empty() {
-                    p.current_command.clone()
-                } else if matches!(p.status, PaneStatus::Background) {
-                    "background".into()
-                } else {
-                    "running".into()
-                },
-                // Background panes don't write activity-log entries, so
-                // their age would look stale even when healthy — omit it.
-                age: if matches!(p.status, PaneStatus::Background) {
-                    None
-                } else {
-                    pane_age(p)
-                },
-                pane_id: p.pane_id.clone(),
-            }
-        })
-        .collect();
+    let rows = summary_section_rows(state, SummarySection::Running);
 
     if rows.is_empty() {
         update_section_rect(state, SummarySection::Running, inner, 0);
@@ -693,80 +976,91 @@ fn render_list_with_targets(
                 section,
             });
 
-        let is_focused = !state.tmux_pane.is_empty() && row.pane_id == state.tmux_pane;
-        let prefix = if selected {
-            "▌ "
-        } else if is_focused {
-            "◉ "
-        } else {
-            "  "
-        };
-        // Fixed identity columns so repo / branch line up vertically and
-        // a long reason can never erase them. 1-cell gap between them.
-        const FIXED_OVERHEAD: usize = 2 /* prefix */ + 2 /* icon + space */ + 2 /* glyph + space */;
-        const REPO_W: usize = 16;
-        const BRANCH_W: usize = 12;
-        const IDENT_W: usize = REPO_W + 1 + BRANCH_W;
-        let available = width.saturating_sub(FIXED_OVERHEAD);
-        // Fixed right-aligned age column so staleness lines up across
-        // every section. Width = widest compact age ("11mo") + 1 sep.
-        const AGE_SLOT: usize = 5;
-        let age_field = match row.age.as_deref() {
-            Some(a) if !state.privacy_mode => {
-                format!("{:>AGE_SLOT$}", truncate_to_width(a, AGE_SLOT - 1))
-            }
-            _ => " ".repeat(AGE_SLOT),
-        };
-        // Reason sits between the identity columns and the fixed age
-        // column; "  (" + ")" = 4 cells of chrome around it. Padding
-        // after the reason keeps the age flush to the right edge.
-        let reason_area = available.saturating_sub(IDENT_W + 4 + AGE_SLOT);
-        let repo_cell = format!(
-            "{:<REPO_W$}",
-            redact(state, &truncate_to_width(&row.repo, REPO_W))
-        );
-        let branch_cell = format!(
-            "{:<BRANCH_W$}",
-            redact(state, &truncate_to_width(&row.branch, BRANCH_W))
-        );
-        let reason_trim = redact(state, &truncate_to_width(&row.reason, reason_area));
-        let reason_pad = reason_area.saturating_sub(super::text::display_width(&reason_trim));
-        let title_style = Style::default()
-            .fg(state.theme.text_active)
-            .add_modifier(if selected {
-                Modifier::BOLD
-            } else {
-                Modifier::empty()
-            });
-        let prefix_style = Style::default().fg(if selected {
-            state.theme.accent
-        } else if is_focused {
-            state.theme.badge_plan
-        } else {
-            state.theme.border_inactive
-        });
-        let line = Line::from(vec![
-            Span::styled(prefix.to_string(), prefix_style),
-            Span::styled(
-                format!("{} ", row.status_icon),
-                Style::default().fg(row.status_color),
-            ),
-            Span::styled(
-                format!("{} ", row.agent_glyph),
-                Style::default().fg(row.agent_color),
-            ),
-            Span::styled(repo_cell, title_style),
-            Span::raw(" "),
-            Span::styled(branch_cell, title_style),
-            Span::styled(
-                format!("  ({reason_trim})"),
-                Style::default().fg(state.theme.wait_reason),
-            ),
-            Span::raw(" ".repeat(reason_pad)),
-            Span::styled(age_field, Style::default().fg(state.theme.text_muted)),
-        ]);
+        let line = summary_row_line(state, row, selected, width);
         frame.render_widget(Paragraph::new(line), row_rect);
     }
+}
+
+/// Build the full-width line for one Summary row. Shared by the quadrant
+/// sections and the full-width search list.
+fn summary_row_line(
+    state: &AppState,
+    row: &SummaryRow,
+    selected: bool,
+    width: usize,
+) -> Line<'static> {
+    let is_focused = !state.tmux_pane.is_empty() && row.pane_id == state.tmux_pane;
+    let prefix = if selected {
+        "▌ "
+    } else if is_focused {
+        "◉ "
+    } else {
+        "  "
+    };
+    // Fixed identity columns so repo / branch line up vertically and
+    // a long reason can never erase them. 1-cell gap between them.
+    const FIXED_OVERHEAD: usize = 2 /* prefix */ + 2 /* icon + space */ + 2 /* glyph + space */;
+    const REPO_W: usize = 16;
+    const BRANCH_W: usize = 12;
+    const IDENT_W: usize = REPO_W + 1 + BRANCH_W;
+    let available = width.saturating_sub(FIXED_OVERHEAD);
+    // Fixed right-aligned age column so staleness lines up across
+    // every section. Width = widest compact age ("11mo") + 1 sep.
+    const AGE_SLOT: usize = 5;
+    let age_field = match row.age.as_deref() {
+        Some(a) if !state.privacy_mode => {
+            format!("{:>AGE_SLOT$}", truncate_to_width(a, AGE_SLOT - 1))
+        }
+        _ => " ".repeat(AGE_SLOT),
+    };
+    // Reason sits between the identity columns and the fixed age
+    // column; "  (" + ")" = 4 cells of chrome around it. Padding
+    // after the reason keeps the age flush to the right edge.
+    let reason_area = available.saturating_sub(IDENT_W + 4 + AGE_SLOT);
+    let repo_cell = format!(
+        "{:<REPO_W$}",
+        redact(state, &truncate_to_width(&row.repo, REPO_W))
+    );
+    let branch_cell = format!(
+        "{:<BRANCH_W$}",
+        redact(state, &truncate_to_width(&row.branch, BRANCH_W))
+    );
+    let reason_trim = redact(state, &truncate_to_width(&row.reason, reason_area));
+    let reason_pad = reason_area.saturating_sub(super::text::display_width(&reason_trim));
+    let title_style = Style::default()
+        .fg(state.theme.text_active)
+        .add_modifier(if selected {
+            Modifier::BOLD
+        } else {
+            Modifier::empty()
+        });
+    let prefix_style = Style::default().fg(if selected {
+        state.theme.accent
+    } else if is_focused {
+        state.theme.badge_plan
+    } else {
+        state.theme.border_inactive
+    });
+    Line::from(vec![
+        Span::styled(prefix.to_string(), prefix_style),
+        Span::styled(
+            format!("{} ", row.status_icon),
+            Style::default().fg(row.status_color),
+        ),
+        Span::styled(
+            format!("{} ", row.agent_glyph),
+            Style::default().fg(row.agent_color),
+        ),
+        Span::styled(repo_cell, title_style),
+        Span::raw(" "),
+        Span::styled(branch_cell, title_style),
+        Span::styled(
+            format!("  ({reason_trim})"),
+            Style::default().fg(state.theme.wait_reason),
+        ),
+        Span::raw(" ".repeat(reason_pad)),
+        Span::styled(age_field, Style::default().fg(state.theme.text_muted)),
+    ])
 }
 
 fn section_scroll(state: &AppState, section: SummarySection) -> usize {
@@ -844,53 +1138,7 @@ fn draw_responded(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Idle agents whose activity log was touched after the user last
-    // focused the pane (= unseen reply). Running panes naturally bump
-    // the log too, so we restrict to status == Idle to avoid overlap
-    // with the Running list. Sorted newest-first by mtime.
-    let mut rows: Vec<(SummaryRow, std::time::SystemTime)> = sorted_summary_panes(state)
-        .into_iter()
-        .filter(|(_, p, _)| matches!(p.status, PaneStatus::Idle) && pane_is_unseen(p))
-        .map(|(group_name, p, info)| {
-            let (repo, branch) = friendly_row_labels(p, info, &group_name, state);
-            let mtime = crate::activity::log_mtime(&p.pane_id).unwrap_or(std::time::UNIX_EPOCH);
-            let last_entry = crate::activity::read_activity_log(&p.pane_id, 1)
-                .into_iter()
-                .next();
-            let reason = if !p.prompt.is_empty() {
-                p.prompt.clone()
-            } else if let Some(e) = last_entry {
-                if e.label.is_empty() {
-                    format!("{} {}", e.timestamp, e.tool)
-                } else {
-                    format!("{} {} {}", e.timestamp, e.tool, e.label)
-                }
-            } else {
-                "responded".into()
-            };
-            let row = SummaryRow {
-                status_icon: "↩".to_string(),
-                status_color: state.theme.badge_auto,
-                agent_glyph: p.agent.glyph(),
-                agent_color: agent_color(state, &p.agent),
-                repo,
-                branch,
-                reason,
-                age: pane_age(p),
-                pane_id: p.pane_id.clone(),
-            };
-            (row, mtime)
-        })
-        .collect();
-
-    // Default oldest-first: Responded is a review queue, top = next to
-    // handle. `o` flips to newest-first for a freshest-on-top view.
-    if state.responded_newest_first {
-        rows.sort_by(|a, b| b.1.cmp(&a.1));
-    } else {
-        rows.sort_by(|a, b| a.1.cmp(&b.1));
-    }
-    let rows: Vec<SummaryRow> = rows.into_iter().map(|(r, _)| r).collect();
+    let rows = summary_section_rows(state, SummarySection::Responded);
 
     if rows.is_empty() {
         update_section_rect(state, SummarySection::Responded, inner, 0);
@@ -910,43 +1158,7 @@ fn draw_marked_unread(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Pinned-by-user panes that are still purely Idle (the cleanup sweep
-    // in state.refresh() drops marks the moment a pane gets busy again).
-    // Sorted newest-marked first.
-    let mut rows: Vec<(SummaryRow, u64)> = sorted_summary_panes(state)
-        .into_iter()
-        .filter(|(_, p, _)| {
-            matches!(p.status, PaneStatus::Idle)
-                && !p.attention
-                && p.marked_unread_at.is_some()
-                && !crate::pending::pane_is_unseen(p)
-        })
-        .map(|(group_name, p, info)| {
-            let (repo, branch) = friendly_row_labels(p, info, &group_name, state);
-            let marked_at = p.marked_unread_at.unwrap_or(0);
-            let reason = if !p.prompt.is_empty() {
-                p.prompt.clone()
-            } else {
-                "pinned".into()
-            };
-            let row = SummaryRow {
-                status_icon: "📌".to_string(),
-                status_color: state.theme.badge_plan,
-                agent_glyph: p.agent.glyph(),
-                agent_color: agent_color(state, &p.agent),
-                repo,
-                branch,
-                reason,
-                // Pinned parking lot — keep it clean, no age column.
-                age: None,
-                pane_id: p.pane_id.clone(),
-            };
-            (row, marked_at)
-        })
-        .collect();
-
-    rows.sort_by(|a, b| b.1.cmp(&a.1));
-    let rows: Vec<SummaryRow> = rows.into_iter().map(|(r, _)| r).collect();
+    let rows = summary_section_rows(state, SummarySection::MarkedUnread);
 
     if rows.is_empty() {
         update_section_rect(state, SummarySection::MarkedUnread, inner, 0);
@@ -966,52 +1178,7 @@ fn draw_idle(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Idle panes the user has already viewed. Unseen replies appear in
-    // the Responded list instead.
-    let mut rows: Vec<(SummaryRow, std::time::SystemTime)> = sorted_summary_panes(state)
-        .into_iter()
-        .filter(|(_, p, _)| {
-            matches!(p.status, PaneStatus::Idle)
-                && !pane_is_unseen(p)
-                && p.marked_unread_at.is_none()
-        })
-        .map(|(group_name, p, info)| {
-            let (repo, branch) = friendly_row_labels(p, info, &group_name, state);
-            let mtime = crate::activity::log_mtime(&p.pane_id).unwrap_or(std::time::UNIX_EPOCH);
-            // Prefer the last assistant message / user prompt (same source
-            // Running and Responded use). Fall back to the latest activity
-            // log entry, then to a static "idle" label.
-            let reason = if !p.prompt.is_empty() {
-                p.prompt.clone()
-            } else if let Some(e) = crate::activity::read_activity_log(&p.pane_id, 1)
-                .into_iter()
-                .next()
-            {
-                if e.label.is_empty() {
-                    format!("{} {}", e.timestamp, e.tool)
-                } else {
-                    format!("{} {} {}", e.timestamp, e.tool, e.label)
-                }
-            } else {
-                "idle".into()
-            };
-            let row = SummaryRow {
-                status_icon: state.icons.status_icon(&p.status).to_string(),
-                status_color: state.theme.status_idle,
-                agent_glyph: p.agent.glyph(),
-                agent_color: agent_color(state, &p.agent),
-                repo,
-                branch,
-                reason,
-                age: pane_age(p),
-                pane_id: p.pane_id.clone(),
-            };
-            (row, mtime)
-        })
-        .collect();
-
-    rows.sort_by(|a, b| b.1.cmp(&a.1));
-    let rows: Vec<SummaryRow> = rows.into_iter().map(|(r, _)| r).collect();
+    let rows = summary_section_rows(state, SummarySection::Idle);
 
     if rows.is_empty() {
         update_section_rect(state, SummarySection::Idle, inner, 0);
@@ -1170,7 +1337,7 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let any_visible = state
         .repo_groups
         .iter()
-        .any(|g| g.has_visible_panes(hide_idle));
+        .any(|g| g.has_visible_panes(hide_idle, &state.search_query));
     if !any_visible {
         let msg = if hide_idle {
             "  no active agents (press `a` to show idle)"
@@ -1196,7 +1363,7 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let mut row_base: usize = 0;
     let mut total_tiles: usize = 0;
     for (idx, group) in state.repo_groups.iter().enumerate() {
-        let visible = group.visible_pane_indices(hide_idle);
+        let visible = group.visible_pane_indices(hide_idle, &state.search_query);
         if visible.is_empty() {
             continue;
         }
@@ -1242,7 +1409,8 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
             if b.folded {
                 continue;
             }
-            let panes = state.repo_groups[b.group_idx].visible_pane_count(hide_idle);
+            let panes =
+                state.repo_groups[b.group_idx].visible_pane_count(hide_idle, &state.search_query);
             if state.tile_selected < seen + panes {
                 let local = state.tile_selected - seen;
                 let r = (local / cols) as i32;
@@ -1277,7 +1445,8 @@ fn draw_tiles(frame: &mut Frame, state: &mut AppState, area: Rect) {
         let header_y = vp_top + b.virtual_y - scroll;
         if header_y >= vp_top && header_y < vp_bottom {
             let group_name = friendly_group_name(&state.repo_groups[group_idx], state);
-            let visible_for_header = state.repo_groups[group_idx].visible_pane_indices(hide_idle);
+            let visible_for_header =
+                state.repo_groups[group_idx].visible_pane_indices(hide_idle, &state.search_query);
             let count = visible_for_header.len();
             let attention = visible_for_header
                 .iter()
@@ -1324,7 +1493,8 @@ fn draw_group_tiles(
     hide_idle: bool,
 ) {
     let cols = col_constraints.len();
-    let visible_idx = state.repo_groups[group_idx].visible_pane_indices(hide_idle);
+    let visible_idx =
+        state.repo_groups[group_idx].visible_pane_indices(hide_idle, &state.search_query);
     let vp_top = area.y as i32;
     let vp_bottom = vp_top + area.height as i32;
 

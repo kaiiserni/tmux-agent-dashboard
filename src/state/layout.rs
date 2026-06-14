@@ -35,6 +35,9 @@ pub struct FrameLayout {
     pub overview_total_lines: usize,
     /// Inner height of the Overview tab viewport, for page-scroll steps.
     pub overview_view_height: usize,
+    /// Height of the content area while the `/` filter is active, so
+    /// Ctrl+u/d in search can step a real half-page.
+    pub search_view_height: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -65,6 +68,7 @@ pub enum HeaderAction {
     ToggleRespondedOrder,
     ToggleActiveOnly,
     ToggleFold,
+    Search,
     ClearSelected,
     ToggleRedact,
     Close,

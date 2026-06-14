@@ -53,6 +53,11 @@ pub const DASHBOARD_SHOW_TECHNICAL_NAMES: &str = "@dashboard_show_technical_name
 /// restart.
 pub const DASHBOARD_RESPONDED_NEWEST_FIRST: &str = "@dashboard_responded_newest_first";
 
+/// When set, the pending list (status-line bar + `prefix + n` picker) is
+/// shown in reverse. Marked-unread panes always stay at the back regardless.
+/// Toggled with `o` in the jump picker.
+pub const DASHBOARD_PENDING_REVERSE: &str = "@dashboard_pending_reverse";
+
 /// Tab that was active when the dashboard last switched views
 /// (`summary` / `tiles` / `overview`). Restored on startup so the popup
 /// reopens where you left it.
