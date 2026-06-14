@@ -83,6 +83,12 @@ pub struct AppState {
     /// Tiles view: when `true`, hide pure-idle panes (idle, no attention,
     /// no marked-unread). Toggled with `a` in the Tiles tab.
     pub tiles_hide_idle: bool,
+    /// Tiles/Summary fuzzy filter (`/`). When `search_active`, the view is
+    /// narrowed live to panes matching `search_query` and most single-key
+    /// actions are suspended (printable keys feed the query). `search_query`
+    /// is empty whenever search is inactive, so the filter is a no-op then.
+    pub search_active: bool,
+    pub search_query: String,
     /// Currently-selected row in the Summary view (index into `summary_targets`).
     pub summary_selected: usize,
     pub summary_scroll_attention: usize,
@@ -145,6 +151,8 @@ impl AppState {
             expanded_group: None,
             expand_all_groups: true,
             tiles_hide_idle: false,
+            search_active: false,
+            search_query: String::new(),
             summary_selected: 0,
             summary_scroll_attention: 0,
             summary_scroll_waiting: 0,

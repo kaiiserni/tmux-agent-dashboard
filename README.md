@@ -81,6 +81,12 @@ Act on the selected pane:
 
 The Tiles view adds `f` / `z` to cycle folding (one group open, all closed, all open), `d` / `u` to step between groups, and `a` to hide idle panes.
 
+`/` opens a live filter in any tab: type to narrow, `↑` / `↓` or `Ctrl-j` /
+`Ctrl-k` to move, `Enter` to jump, `Esc` to clear and exit. In Tiles and
+Summary it matches pane names (repo, branch, session) with the strict
+substring/acronym rule; in Overview it filters projects/idle entries with a
+looser subsequence match over their full text.
+
 The header items are clickable too: clicking one runs the matching key (and clicking the tab label or `Tab: switch` flips the view).
 
 Each tile in the Tiles view also shows a context-preview line: the pane's
@@ -94,13 +100,26 @@ can hop to one without the full dashboard. Bind it to a key, e.g.:
 ```tmux
 bind -N "agents: jump picker" n display-popup -E -w 76 -h 18 \
   '~/projects/tmux-agent-dashboard/bin/tmux-agent-dashboard jump'
+# open straight on the Search tab:
+bind -N "agents: search" a display-popup -E -w 76 -h 18 \
+  '~/projects/tmux-agent-dashboard/bin/tmux-agent-dashboard jump search'
 ```
 
-The status bar numbers its first nine pending panes (1-9); the picker
-lists the same panes under those numbers, with a short countdown.
-Leave it alone and it jumps to the most urgent pane (the plain `next`
-behaviour); press a number, or navigate and confirm, to pick another. The
-first navigation key cancels the countdown.
+The popup has two tabs. The **Jump** tab numbers the first nine pending
+panes (1-9), matching the status bar, with a short countdown: leave it
+alone and it jumps to the most urgent pane (the plain `next` behaviour);
+press a number, or navigate and confirm, to pick another. The first
+navigation key cancels the countdown.
+
+`s`, `/` or `Tab` switches to the **Search** tab — a fuzzy filter over
+*every* agent pane across all sessions (match on repo, branch, session or
+agent), not just the pending ones. It is vim-modal: you arrive in insert
+mode (type to filter); `Esc` drops to normal mode (`j`/`k` to move). `Tab`
+cycles the modes (Jump → insert → normal → Jump). When the popup is opened
+straight on the Search tab (the `jump search` bind), `Esc` from normal mode
+closes it instead of falling back to the Jump tab.
+
+Jump tab:
 
 | Key | Action |
 |---|---|
@@ -109,7 +128,25 @@ first navigation key cancels the countdown.
 | `g` / `G` | First / last |
 | `Enter` | Jump to the highlighted pane |
 | `n` | Jump to the most urgent pane now |
-| `q` / `Esc` | Close without jumping |
+| `s` / `/` / `Tab` | Switch to the Search tab |
+| `q` / `Esc` | Close |
+
+Search tab:
+
+| Key | Action |
+|---|---|
+| _type_ | Filter (insert mode) |
+| `Backspace` | Delete a query char |
+| `↑` / `↓`, `Ctrl-n` / `Ctrl-p`, `Ctrl-j` / `Ctrl-k` | Move selection (insert mode) |
+| `j` / `k`, `g` / `G` | Move selection (normal mode) |
+| `s` | Toggle ordering: newest activity ↔ alphabetical (normal mode) |
+| `Esc` | Insert → normal mode; normal → Jump tab (or close if opened on Search) |
+| `Tab` | Insert → normal → Jump tab (cycle) |
+| `i` / `/` | Re-enter insert mode (normal mode) |
+| `Enter` | Jump to the highlighted pane |
+
+The Search list is ordered newest-activity-first by default; `s` toggles
+alphabetical. The footer shows the current order (`[recent]` / `[a-z]`).
 
 A single pending pane skips the popup and jumps straight there. The
 countdown defaults to 250ms (`@dashboard_jump_timeout_ms`); set it to `0`

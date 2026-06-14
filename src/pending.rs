@@ -61,7 +61,59 @@ pub fn collect_pending() -> Vec<PendingEntry> {
             .cmp(&b.priority)
             .then_with(|| b.mtime.cmp(&a.mtime))
     });
+
+    // `o` in the jump picker flips the order. Marked-unread stays at the
+    // back regardless (it's the lowest priority), so only the rest reverses.
+    let reverse = tmux::get_option(tmux::DASHBOARD_PENDING_REVERSE)
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if reverse {
+        let (mut rest, marked): (Vec<_>, Vec<_>) = out
+            .into_iter()
+            .partition(|e| e.priority != Priority::MarkedUnread);
+        rest.reverse();
+        rest.extend(marked);
+        rest
+    } else {
+        out
+    }
+}
+
+/// Every agent pane as an entry, regardless of pending state — feeds the
+/// jump picker's fuzzy search mode. Ranking is left to the caller (fuzzy
+/// score); here entries come out in the stable group order.
+pub fn collect_all() -> Vec<PendingEntry> {
+    let sessions = tmux::query_sessions();
+    let mut groups: Vec<RepoGroup> = group_panes_by_repo(&sessions);
+    sweep_stale_marks(&mut groups);
+
+    let show_technical = tmux::get_option(tmux::DASHBOARD_SHOW_TECHNICAL_NAMES)
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+
+    let mut out: Vec<PendingEntry> = Vec::new();
+    for group in &groups {
+        for (pane, info) in &group.panes {
+            let mtime = log_mtime(&pane.pane_id).unwrap_or(SystemTime::UNIX_EPOCH);
+            let priority = pane_priority(pane, mtime);
+            out.push(build_entry(pane, info, &group.name, show_technical, priority, mtime));
+        }
+    }
     out
+}
+
+/// Best-effort priority for any pane, falling back to MarkedUnread (lowest
+/// urgency) for plain running/idle panes that aren't really "pending".
+fn pane_priority(pane: &PaneInfo, mtime: SystemTime) -> Priority {
+    if pane.attention {
+        return Priority::Attention;
+    }
+    match pane.status {
+        PaneStatus::Error => Priority::Error,
+        PaneStatus::Waiting => Priority::Waiting,
+        PaneStatus::Idle if is_unseen(pane, mtime) => Priority::Responded,
+        _ => Priority::MarkedUnread,
+    }
 }
 
 fn classify(
@@ -83,6 +135,17 @@ fn classify(
         }
     };
 
+    Some(build_entry(pane, info, repo, show_technical, priority, mtime))
+}
+
+fn build_entry(
+    pane: &PaneInfo,
+    info: &PaneGitInfo,
+    repo: &str,
+    show_technical: bool,
+    priority: Priority,
+    mtime: SystemTime,
+) -> PendingEntry {
     let (repo, label) = if show_technical {
         (repo.to_string(), label_technical(pane, info))
     } else {
@@ -100,7 +163,7 @@ fn classify(
         (r, l)
     };
 
-    Some(PendingEntry {
+    PendingEntry {
         priority,
         pane_id: pane.pane_id.clone(),
         repo,
@@ -109,7 +172,7 @@ fn classify(
         mtime,
         wait_reason: pane.wait_reason.clone(),
         agent: pane.agent.clone(),
-    })
+    }
 }
 
 fn friendly_pane_label(pane: &PaneInfo) -> String {

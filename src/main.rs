@@ -66,7 +66,11 @@ fn main() -> io::Result<()> {
             return cmd_back();
         }
         Some("jump") => {
-            return cli::jump::cmd_jump();
+            let start_search = args
+                .get(1)
+                .map(|a| a == "search" || a == "--search")
+                .unwrap_or(false);
+            return cli::jump::cmd_jump(start_search);
         }
         Some("mark") => {
             return cmd_mark();

@@ -119,18 +119,26 @@ pub fn draw_overview(frame: &mut Frame, state: &mut AppState, area: Rect) {
     }
     let scroll = state.overview_scroll;
 
-    let sel_style = Style::default().bg(state.theme.selection_bg);
+    let sel_style = Style::default()
+        .bg(state.theme.selection_bg)
+        .add_modifier(Modifier::BOLD);
     let visible: Vec<Line> = rows
         .iter()
         .enumerate()
         .skip(scroll)
         .take(height)
         .map(|(idx, r)| {
-            let line = r.line.clone();
             if Some(idx) == selected_row {
-                line.patch_style(sel_style)
+                // Prepend a visible cursor bar — the bg tint alone is too
+                // subtle to see the selection move.
+                let mut spans = r.line.spans.clone();
+                spans.insert(
+                    0,
+                    Span::styled("▌", Style::default().fg(state.theme.accent)),
+                );
+                Line::from(spans).patch_style(sel_style)
             } else {
-                line
+                r.line.clone()
             }
         })
         .collect();
@@ -152,6 +160,26 @@ pub fn draw_overview(frame: &mut Frame, state: &mut AppState, area: Rect) {
     }
 
     frame.render_widget(Paragraph::new(visible), area);
+}
+
+/// All searchable free text of a project, for the Overview `/` filter.
+fn project_haystack(p: &crate::overview::OverviewProject) -> String {
+    let mut s = format!("{} {} {}", p.name, p.doing, p.needs_from_you);
+    for ns in &p.next_steps {
+        s.push(' ');
+        s.push_str(ns);
+    }
+    for m in &p.active_md {
+        s.push(' ');
+        s.push_str(m);
+    }
+    for pane in &p.panes {
+        s.push(' ');
+        s.push_str(&pane.summary);
+        s.push(' ');
+        s.push_str(&pane.target);
+    }
+    s
 }
 
 fn build_rows(state: &AppState, overview: &Overview, width: usize) -> Vec<Row> {
@@ -203,16 +231,31 @@ fn build_rows(state: &AppState, overview: &Overview, width: usize) -> Vec<Row> {
         push(&mut rows, Line::default());
     }
 
+    // Overview `/` search: lenient subsequence filter over each project's
+    // (and idle entry's) free text. Empty when not searching this tab.
+    let query = if state.search_active && state.dashboard_tab == crate::state::DashboardTab::Overview
+    {
+        state.search_query.as_str()
+    } else {
+        ""
+    };
+
     // ── Projects ─────────────────────────────────────────────────────
     for project in &overview.projects {
-        // Whole-block click target: prefer a waiting/error pane, else the
-        // first one.
+        if !query.is_empty() && !crate::fuzzy::loose_match(&project_haystack(project), query) {
+            continue;
+        }
+        // Whole-block jump/click target: prefer a waiting/error pane, else
+        // the first one. With no tracked agent pane, fall back to the project
+        // name (matched against live tmux sessions at jump time). Always Some
+        // so every project line stays keyboard-navigable.
         let link: Option<(String, String)> = project
             .panes
             .iter()
             .find(|p| matches!(p.status.as_str(), "waiting" | "error"))
             .or_else(|| project.panes.first())
-            .map(|p| (p.pane_id.clone(), p.target.clone()));
+            .map(|p| (p.pane_id.clone(), p.target.clone()))
+            .or_else(|| (!project.name.is_empty()).then_some((String::new(), project.name.clone())));
         let head_color = if project.attention {
             state.theme.status_waiting
         } else {
@@ -322,6 +365,12 @@ fn build_rows(state: &AppState, overview: &Overview, width: usize) -> Vec<Row> {
             link: None,
         });
         for pane in &overview.idle {
+            if !query.is_empty() {
+                let hay = format!("{} {} {}", pane.project, pane.task, pane.target);
+                if !crate::fuzzy::loose_match(&hay, query) {
+                    continue;
+                }
+            }
             let task = redact(state, &pane.task);
             let line = Line::from(vec![
                 Span::styled(format!("  {} · ", pane.target), inactive),

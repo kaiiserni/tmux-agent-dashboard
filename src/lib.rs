@@ -4,6 +4,7 @@ pub mod app;
 pub mod bg;
 pub mod cli;
 pub mod event;
+pub mod fuzzy;
 pub mod group;
 pub mod navigate;
 pub mod overview;
