@@ -96,8 +96,8 @@ bind -N "agents: jump picker" n display-popup -E -w 76 -h 18 \
   '~/projects/tmux-agent-dashboard/bin/tmux-agent-dashboard jump'
 ```
 
-The status bar numbers its first nine pending panes (superscript ¹-⁹); the
-picker lists the same panes under those numbers, with a short countdown.
+The status bar numbers its first nine pending panes (1-9); the picker
+lists the same panes under those numbers, with a short countdown.
 Leave it alone and it jumps to the most urgent pane (the plain `next`
 behaviour); press a number, or navigate and confirm, to pick another. The
 first navigation key cancels the countdown.

@@ -151,10 +151,6 @@ fn cmd_seen(args: &[String]) -> io::Result<()> {
 // status bar. Truncates with "+N more" if it would overflow the client
 // width.
 
-/// Superscript digits for numbering the first nine status-bar entries, so
-/// the bar doubles as the legend for the jump picker's `1`-`9` keys.
-const SUPERSCRIPT: [&str; 9] = ["¹", "²", "³", "⁴", "⁵", "⁶", "⁷", "⁸", "⁹"];
-
 fn cmd_status_line() -> io::Result<()> {
     let entries = pending::collect_pending();
     if entries.is_empty() {
@@ -175,9 +171,12 @@ fn cmd_status_line() -> io::Result<()> {
     let mut visible_len = 0usize;
 
     for entry in &entries {
-        let chunk = match SUPERSCRIPT.get(shown) {
-            Some(sup) => format!("#[fg=colour244]{sup}#[default]{}", format_entry(entry)),
-            None => format_entry(entry),
+        // First nine entries get a number matching the jump picker's 1-9
+        // keys, so the bar doubles as the hotkey legend.
+        let chunk = if shown < 9 {
+            format!("#[fg=colour244]{} #[default]{}", shown + 1, format_entry(entry))
+        } else {
+            format_entry(entry)
         };
         let chunk_visible = visible_width(&chunk);
         let add = if shown == 0 {
