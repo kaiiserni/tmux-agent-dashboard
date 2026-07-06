@@ -13,8 +13,11 @@ use crate::tmux::{self, PaneInfo, PaneStatus};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
-    /// `@pane_attention` explicitly set by a hook (Notification,
-    /// PermissionDenied, TeammateIdle).
+    /// Agent blocked on a tool-approval / elicitation prompt (detected via
+    /// `wait_reason`). Highest urgency — always shown first.
+    Permission,
+    /// `@pane_attention` set by a hook (Notification, PlanReview,
+    /// TeammateIdle) — permission prompts are split out above.
     Attention,
     Error,
     Waiting,
@@ -34,6 +37,16 @@ pub struct PendingEntry {
     pub mtime: SystemTime,
     pub wait_reason: String,
     pub agent: tmux::AgentType,
+}
+
+/// A pane blocked on a tool-approval / elicitation prompt, recognised by the
+/// `wait_reason` the hooks stamp. Canonical home so the hook layer and the
+/// pending classifier agree.
+pub fn is_permission_wait_reason(wait_reason: &str) -> bool {
+    matches!(
+        wait_reason,
+        "permission" | "permission_prompt" | "permission_denied" | "elicitation_dialog"
+    )
 }
 
 pub fn collect_pending() -> Vec<PendingEntry> {
@@ -62,18 +75,27 @@ pub fn collect_pending() -> Vec<PendingEntry> {
             .then_with(|| b.mtime.cmp(&a.mtime))
     });
 
-    // `o` in the jump picker flips the order. Marked-unread stays at the
-    // back regardless (it's the lowest priority), so only the rest reverses.
+    // `o` in the jump picker flips the order. Permission prompts stay pinned
+    // at the front and Marked-unread at the back regardless — only the
+    // middle reverses.
     let reverse = tmux::get_option(tmux::DASHBOARD_PENDING_REVERSE)
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
     if reverse {
-        let (mut rest, marked): (Vec<_>, Vec<_>) = out
-            .into_iter()
-            .partition(|e| e.priority != Priority::MarkedUnread);
-        rest.reverse();
-        rest.extend(marked);
-        rest
+        let mut permission = Vec::new();
+        let mut middle = Vec::new();
+        let mut marked = Vec::new();
+        for e in out {
+            match e.priority {
+                Priority::Permission => permission.push(e),
+                Priority::MarkedUnread => marked.push(e),
+                _ => middle.push(e),
+            }
+        }
+        middle.reverse();
+        permission.extend(middle);
+        permission.extend(marked);
+        permission
     } else {
         out
     }
@@ -105,6 +127,9 @@ pub fn collect_all() -> Vec<PendingEntry> {
 /// Best-effort priority for any pane, falling back to MarkedUnread (lowest
 /// urgency) for plain running/idle panes that aren't really "pending".
 fn pane_priority(pane: &PaneInfo, mtime: SystemTime) -> Priority {
+    if is_permission_wait_reason(&pane.wait_reason) {
+        return Priority::Permission;
+    }
     if pane.attention {
         return Priority::Attention;
     }
@@ -123,7 +148,9 @@ fn classify(
     show_technical: bool,
 ) -> Option<PendingEntry> {
     let mtime = log_mtime(&pane.pane_id).unwrap_or(SystemTime::UNIX_EPOCH);
-    let priority = if pane.attention {
+    let priority = if is_permission_wait_reason(&pane.wait_reason) {
+        Priority::Permission
+    } else if pane.attention {
         Priority::Attention
     } else {
         match pane.status {

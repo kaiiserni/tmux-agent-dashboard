@@ -360,6 +360,7 @@ fn next_target(entries: &[PendingEntry]) -> &str {
 
 fn priority_glyph(p: Priority) -> (&'static str, u8) {
     match p {
+        Priority::Permission => ("🔑", 213),
         Priority::Attention => ("▲", 167),
         Priority::Error => ("✕", 167),
         Priority::Waiting => ("◐", 221),
