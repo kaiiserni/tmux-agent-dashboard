@@ -231,6 +231,7 @@ fn cmd_status_line() -> io::Result<()> {
 
 fn format_entry(e: &PendingEntry) -> String {
     let (icon, icon_color) = match e.priority {
+        Priority::Permission => ("🔑", 213),
         Priority::Attention => ("▲", 167),
         Priority::Error => ("✕", 167),
         Priority::Waiting => ("◐", 221),

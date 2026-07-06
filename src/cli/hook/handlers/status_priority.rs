@@ -10,10 +10,7 @@
 //! shell is live — the user still has to act on the prompt.
 
 pub(in crate::cli::hook) fn is_permission_wait_reason(wait_reason: &str) -> bool {
-    matches!(
-        wait_reason,
-        "permission" | "permission_prompt" | "permission_denied" | "elicitation_dialog"
-    )
+    crate::pending::is_permission_wait_reason(wait_reason)
 }
 
 pub(in crate::cli::hook) fn resolve_stop_status(bg_shell_live: bool) -> &'static str {
