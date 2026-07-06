@@ -5,6 +5,14 @@ aggregate counters, attention / waiting / responded lists on the left,
 running / idle lists on the right, and a global recent-activity feed at
 the bottom. Also includes a tiles grid view for a quick visual overview.
 
+<p align="center">
+  <img src="docs/screenshot.png" alt="tmux-agent-dashboard summary view">
+</p>
+
+A phone companion app lives at
+[tmux-agent-companion](https://github.com/kaiiserni/tmux-agent-companion) - read,
+approve and reply to your agents from your phone.
+
 ## Agent hooks
 
 Agents call `tmux-agent-dashboard hook <agent> <event>`, which writes the
