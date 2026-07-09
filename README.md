@@ -1,6 +1,6 @@
 # tmux-agent-dashboard
 
-A tmux popup dashboard for Claude Code / Codex / OpenCode agents. Shows
+A tmux popup dashboard for Claude Code / Codex / OpenCode / Grok agents. Shows
 aggregate counters, attention / waiting / responded lists on the left,
 running / idle lists on the right, and a global recent-activity feed at
 the bottom. Also includes a tiles grid view for a quick visual overview.
@@ -22,10 +22,19 @@ Agents call `tmux-agent-dashboard hook <agent> <event>`, which writes the
 tmux-agent-dashboard install-hooks claude          # print, review, merge yourself
 tmux-agent-dashboard install-hooks claude --write  # merge into ~/.claude/settings.json (backs up, keeps other hooks)
 tmux-agent-dashboard install-hooks codex  --write  # ~/.codex/hooks.json
+tmux-agent-dashboard install-hooks grok   --write  # ~/.grok/hooks/tmux-agent-dashboard.json
 ```
 
-`claude`, `codex`, `antigravity`, `pi`. Panes without `@pane_agent` are detected
-via a process-tree scan (`@dashboard_detect_fallback`, default on).
+`claude`, `codex`, `antigravity`, `pi`, `grok`. Panes without `@pane_agent` are
+detected via a process-tree scan (`@dashboard_detect_fallback`, default on).
+
+Grok Build scans `~/.claude/settings.json` for hooks by default, so a grok pane
+can end up tagged `claude`. Disable that in `~/.grok/config.toml`:
+
+```toml
+[compat.claude]
+hooks = false
+```
 
 ## Install
 
@@ -289,7 +298,7 @@ the `agent-overview` job) reads the same options:
 
 | Option | Meaning |
 |---|---|
-| `@pane_agent` | agent kind (`claude`/`codex`/`opencode`/`antigravity`/`pi`); a pane is only an "agent pane" when set |
+| `@pane_agent` | agent kind (`claude`/`codex`/`opencode`/`antigravity`/`pi`/`grok`); a pane is only an "agent pane" when set |
 | `@pane_status` | `running` / `waiting` / `idle` / `background` / `error` |
 | `@pane_attention` | set when the agent flagged it needs the developer |
 | `@pane_cwd` | working directory |

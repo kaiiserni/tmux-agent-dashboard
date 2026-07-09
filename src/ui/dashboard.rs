@@ -1126,6 +1126,7 @@ fn agent_color(state: &AppState, agent: &crate::tmux::AgentType) -> ratatui::sty
         crate::tmux::AgentType::OpenCode => state.theme.agent_opencode,
         crate::tmux::AgentType::Antigravity => state.theme.agent_antigravity,
         crate::tmux::AgentType::Pi => state.theme.agent_pi,
+        crate::tmux::AgentType::Grok => state.theme.agent_grok,
         crate::tmux::AgentType::Unknown => state.theme.text_muted,
     }
 }
