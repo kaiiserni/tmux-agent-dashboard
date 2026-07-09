@@ -8,7 +8,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::tmux::{
-    ANTIGRAVITY_AGENT, AgentType, CLAUDE_AGENT, CODEX_AGENT, OPENCODE_AGENT, PI_AGENT,
+    ANTIGRAVITY_AGENT, AgentType, CLAUDE_AGENT, CODEX_AGENT, GROK_AGENT, OPENCODE_AGENT, PI_AGENT,
 };
 
 /// Agent binary names tried against the process tree, paired with their type.
@@ -18,6 +18,7 @@ const AGENT_NAMES: &[(&str, AgentType)] = &[
     (OPENCODE_AGENT, AgentType::OpenCode),
     (ANTIGRAVITY_AGENT, AgentType::Antigravity),
     (PI_AGENT, AgentType::Pi),
+    (GROK_AGENT, AgentType::Grok),
 ];
 
 #[derive(Debug, Clone)]
@@ -142,5 +143,12 @@ mod tests {
     fn matches_first_arg_basename() {
         let s = snap("100 1 node /usr/local/bin/claude --foo\n");
         assert_eq!(s.detect_agent(100), Some(AgentType::Claude));
+    }
+
+    #[test]
+    fn detects_grok_descendant() {
+        // pane shell 100 → grok 200 (bare Grok Build run, no hooks)
+        let s = snap("100 1 zsh -zsh\n200 100 grok /home/u/.grok/bin/grok\n");
+        assert_eq!(s.detect_agent(100), Some(AgentType::Grok));
     }
 }

@@ -15,6 +15,7 @@ use crate::adapter::HookRegistration;
 use crate::adapter::antigravity::AntigravityAdapter;
 use crate::adapter::claude::ClaudeAdapter;
 use crate::adapter::codex::CodexAdapter;
+use crate::adapter::grok::GrokAdapter;
 use crate::adapter::pi::PiAdapter;
 
 // opencode is intentionally absent: its adapter exposes no HOOK_REGISTRATIONS
@@ -25,6 +26,7 @@ fn registrations(agent: &str) -> Option<&'static [HookRegistration]> {
         "codex" => Some(CodexAdapter::HOOK_REGISTRATIONS),
         "antigravity" => Some(AntigravityAdapter::HOOK_REGISTRATIONS),
         "pi" => Some(PiAdapter::HOOK_REGISTRATIONS),
+        "grok" => Some(GrokAdapter::HOOK_REGISTRATIONS),
         _ => None,
     }
 }
@@ -36,6 +38,10 @@ fn config_path(agent: &str) -> Option<PathBuf> {
     match agent {
         "claude" => Some(home.join(".claude/settings.json")),
         "codex" => Some(home.join(".codex/hooks.json")),
+        // Grok Build reads a directory of hook files (~/.grok/hooks/*.json) in
+        // the Claude-compatible `{hooks:{…}}` shape, so a dedicated drop-in file
+        // needs no merge with grok's own config.
+        "grok" => Some(home.join(".grok/hooks/tmux-agent-dashboard.json")),
         _ => None,
     }
 }
@@ -128,12 +134,12 @@ fn merge_into(existing_hooks: &mut Map<String, Value>, generated: &Value, agent:
 
 pub fn cmd_install_hooks(args: &[String]) -> i32 {
     let Some(agent) = args.first().map(|s| s.as_str()) else {
-        eprintln!("usage: tmux-agent-dashboard install-hooks <claude|codex|opencode|antigravity|pi> [--write]");
+        eprintln!("usage: tmux-agent-dashboard install-hooks <claude|codex|opencode|antigravity|pi|grok> [--write]");
         return 2;
     };
     let write = args.iter().any(|a| a == "--write");
     let Some(regs) = registrations(agent) else {
-        eprintln!("unsupported agent '{agent}' (claude|codex|antigravity|pi)");
+        eprintln!("unsupported agent '{agent}' (claude|codex|antigravity|pi|grok)");
         return 2;
     };
 
@@ -151,6 +157,12 @@ pub fn cmd_install_hooks(args: &[String]) -> i32 {
         eprintln!("--write not supported for '{agent}' (unknown config format); use the printed snippet above");
         return 2;
     };
+
+    // Some agents (e.g. grok's ~/.grok/hooks/) keep hooks in a subdir that may
+    // not exist yet; create it so the write below can't fail on a missing dir.
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
 
     let mut root: Value = match std::fs::read_to_string(&path) {
         Ok(s) => serde_json::from_str(&s).unwrap_or_else(|_| json!({})),

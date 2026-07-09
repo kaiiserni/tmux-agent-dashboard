@@ -3,6 +3,7 @@ pub const CODEX_AGENT: &str = "codex";
 pub const OPENCODE_AGENT: &str = "opencode";
 pub const ANTIGRAVITY_AGENT: &str = "antigravity";
 pub const PI_AGENT: &str = "pi";
+pub const GROK_AGENT: &str = "grok";
 
 #[derive(Debug, Clone)]
 pub struct PaneInfo {
@@ -111,6 +112,7 @@ pub enum AgentType {
     OpenCode,
     Antigravity,
     Pi,
+    Grok,
     Unknown,
 }
 
@@ -136,6 +138,7 @@ impl AgentType {
             OPENCODE_AGENT => Some(Self::OpenCode),
             ANTIGRAVITY_AGENT => Some(Self::Antigravity),
             PI_AGENT => Some(Self::Pi),
+            GROK_AGENT => Some(Self::Grok),
             _ => None,
         }
     }
@@ -149,6 +152,7 @@ impl AgentType {
             Self::OpenCode => "◇",
             Self::Antigravity => "▲",
             Self::Pi => "π",
+            Self::Grok => "⊗",
             Self::Unknown => "·",
         }
     }
